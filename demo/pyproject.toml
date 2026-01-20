@@ -1,0 +1,9 @@
+[project]
+name = "deep-agent-demo"
+version = "0.1.0"
+description = "Gradio demo UI for deep agent service"
+requires-python = ">=3.11"
+dependencies = [
+    "gradio>=4.0.0",
+    "httpx>=0.27.0",
+]

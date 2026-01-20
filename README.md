@@ -1,7 +1,7 @@
 # Deep Agent Service
 
-[![CI](https://github.com/fasteroutcomes/deep-agent-service/workflows/CI/badge.svg)](https://github.com/fasteroutcomes/deep-agent-service/actions/workflows/ci.yml)
-![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/IzzyFuller/100b39151bc1c8397fb6a684ade5e588/raw/coverage.json)
+![CI](https://github.com/IzzyFuller/deep_agent_service/workflows/CI/badge.svg)
+[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/IzzyFuller/100b39151bc1c8397fb6a684ade5e588/raw/coverage.json)](https://gist.github.com/IzzyFuller/100b39151bc1c8397fb6a684ade5e588)
 ![Python](https://img.shields.io/badge/python-3.13-blue)
 ![License](https://img.shields.io/badge/license-proprietary-red)
 

@@ -247,7 +247,7 @@ requires-dist = [
     { name = "google-cloud-storage", specifier = ">=3.7.0,<4.0.0" },
     { name = "langfuse", specifier = ">=3.11.1,<4.0.0" },
     { name = "pydantic", specifier = ">=2.12.5,<3.0.0" },
-    { name = "synapse", directory = "../pubsub" },
+    { name = "synapse", git = "https://github.com/IzzyFuller/synapse.git?rev=main" },
     { name = "uvicorn", specifier = ">=0.34.0,<0.35.0" },
 ]
 
@@ -1414,21 +1414,9 @@ wheels = [
 [[package]]
 name = "synapse"
 version = "0.1.0"
-source = { directory = "../pubsub" }
+source = { git = "https://github.com/IzzyFuller/synapse.git?rev=main#80f40973751fc7f02d48ea3b9aeff8a1b1f31354" }
 dependencies = [
     { name = "pydantic" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "pydantic", specifier = ">=2.5.0" }]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "mypy", specifier = ">=1.5.0" },
-    { name = "pytest", specifier = ">=7.4.0" },
-    { name = "pytest-asyncio", specifier = ">=0.21.0" },
-    { name = "pytest-cov", specifier = ">=4.1.0" },
-    { name = "ruff", specifier = ">=0.1.0" },
 ]
 
 [[package]]

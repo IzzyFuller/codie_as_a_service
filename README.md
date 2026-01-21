@@ -3,7 +3,7 @@
 ![CI](https://github.com/IzzyFuller/deep_agent_service/workflows/CI/badge.svg)
 [![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/IzzyFuller/100b39151bc1c8397fb6a684ade5e588/raw/coverage.json)](https://gist.github.com/IzzyFuller/100b39151bc1c8397fb6a684ade5e588)
 ![Python](https://img.shields.io/badge/python-3.13-blue)
-![License](https://img.shields.io/badge/license-proprietary-red)
+![License](https://img.shields.io/badge/license-MIT-green)
 
 Microservice for per-user agent identity and memory - a prototype for "Codie-as-a-Service".
 
@@ -42,12 +42,12 @@ deep_agent_service/
 ## Technology Stack
 
 ### Core Dependencies
-- **Python**: 3.13.x (constrained by fasteroutcomes-pubsub)
+- **Python**: 3.13.x
 - **Anthropic SDK**: Direct LLM integration (no LangChain/LangGraph overhead)
 - **Langfuse**: Version-controlled prompts
 - **Google Cloud**: Storage (GCS) for user memory files, Firestore for session metadata
 - **Pydantic**: Type-safe models throughout
-- **fasteroutcomes-pubsub**: Stack-agnostic pub/sub library
+- **synapse**: Stack-agnostic pub/sub library
 
 ### Dev Dependencies
 - **pytest**: Testing framework with coverage and async support
@@ -95,7 +95,7 @@ deep_agent_service/
 
 ```bash
 # Clone repository
-git clone https://github.com/fasteroutcomes/deep-agent-service.git
+git clone https://github.com/IzzyFuller/deep_agent_service.git
 cd deep-agent-service
 
 # Install all dependencies (main + dev + demo)
@@ -254,7 +254,7 @@ gs://deep-agent-memory-{env}/
 
 ## Contributing
 
-This is an internal FasterOutcomes project. Follow established patterns:
+Follow established patterns:
 - TDD workflow mandatory
 - 100% test coverage required
 - Hexagonal architecture principles
@@ -262,4 +262,4 @@ This is an internal FasterOutcomes project. Follow established patterns:
 
 ## License
 
-Proprietary - FasterOutcomes
+MIT

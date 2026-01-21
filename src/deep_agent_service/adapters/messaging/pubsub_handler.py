@@ -1,9 +1,9 @@
 """Pub/Sub message handler for agent requests.
 
-Implements MessageHandler protocol from fasteroutcomes-pubsub.
+Implements MessageHandler protocol from synapse.
 """
 
-from fasteroutcomes_pubsub.protocols.publisher import PubSubPublisher
+from synapse.protocols.publisher import PubSubPublisher
 
 from deep_agent_service.core.models import RunAgentRequest, AgentResponse
 from deep_agent_service.services.memory.memory_service import MemoryService
@@ -16,7 +16,7 @@ class AgentMessageHandler:
     """
     Handles validated RunAgentRequest messages.
 
-    Implements MessageHandler protocol from fasteroutcomes-pubsub.
+    Implements MessageHandler protocol from synapse.
     Processes requests through ReActAgent and publishes AgentResponse.
     """
 
@@ -60,7 +60,7 @@ class AgentMessageHandler:
         """
         Process validated RunAgentRequest and publish response.
 
-        Implements MessageHandler protocol from fasteroutcomes-pubsub.
+        Implements MessageHandler protocol from synapse.
 
         Args:
             request: Validated RunAgentRequest (parsed by MessageConsumer)

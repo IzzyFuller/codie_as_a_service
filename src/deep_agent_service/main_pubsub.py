@@ -1,15 +1,15 @@
 """Pub/Sub entry point for deep agent service.
 
-Uses MessageConsumer from fasteroutcomes-pubsub for message handling.
+Uses MessageConsumer from synapse for message handling.
 """
 
 import os
 import signal
 import threading
 
-from fasteroutcomes_pubsub.consumer.message_consumer import MessageConsumer
-from fasteroutcomes_pubsub.protocols.publisher import PubSubPublisher
-from fasteroutcomes_pubsub.protocols.subscriber import PubSubSubscriber
+from synapse.consumer.message_consumer import MessageConsumer
+from synapse.protocols.publisher import PubSubPublisher
+from synapse.protocols.subscriber import PubSubSubscriber
 
 from deep_agent_service.adapters.messaging.pubsub_handler import AgentMessageHandler
 from deep_agent_service.core.models import RunAgentRequest
@@ -20,7 +20,7 @@ class AgentApp:
     """
     Main application that listens for requests and processes them.
 
-    Uses MessageConsumer from fasteroutcomes-pubsub to handle Pub/Sub messages.
+    Uses MessageConsumer from synapse to handle Pub/Sub messages.
     Subscribes to a Pub/Sub topic, processes incoming RunAgentRequest messages
     through the ReActAgent, and publishes AgentResponse messages.
     """
@@ -50,7 +50,7 @@ class AgentApp:
             publisher=publisher,
         )
 
-        # Create consumer from fasteroutcomes-pubsub
+        # Create consumer from synapse
         self._consumer = MessageConsumer(
             subscription=request_subscription_path,
             handler=handler,

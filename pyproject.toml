@@ -3,7 +3,7 @@ name = "deep-agent-service"
 version = "0.1.0"
 description = "Microservice for per-user agent identity and memory"
 authors = [
-    {name = "FasterOutcomes",email = "engineering@fasteroutcomes.com"}
+    {name = "Izzy Fuller"}
 ]
 readme = "README.md"
 requires-python = ">=3.13,<3.14"
@@ -14,7 +14,7 @@ dependencies = [
     "google-cloud-firestore (>=2.22.0,<3.0.0)",
     "google-cloud-pubsub (>=2.26.0,<3.0.0)",
     "pydantic (>=2.12.5,<3.0.0)",
-    "fasteroutcomes-pubsub @ git+https://github.com/fasteroutcomes/fasteroutcomes-pubsub.git@main",
+    "synapse @ file:///Users/izzyfuller/IzzysProjects/pubsub",
     "fastapi (>=0.115.0,<0.116.0)",
     "uvicorn (>=0.34.0,<0.35.0)"
 ]

@@ -169,4 +169,3 @@ class LocalLLMAdapter:
             )
 
         return tool_calls, remaining_text
-

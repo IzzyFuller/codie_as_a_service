@@ -21,15 +21,16 @@ logger = logging.getLogger(__name__)
 class OpenAILLMAdapter:
     """Adapter for OpenAI API and OpenAI-compatible endpoints (e.g., mlx_lm.server)."""
 
-    def __init__(self, base_url: str, model: str):
+    def __init__(self, base_url: str, model: str, timeout: float = 120.0):
         """
         Initialize adapter with base URL and model name.
 
         Args:
             base_url: Base URL for the OpenAI-compatible API endpoint
             model: Model identifier to use
+            timeout: Request timeout in seconds (default 120s for local LLMs)
         """
-        self._client = OpenAI(base_url=base_url, api_key="not-needed")
+        self._client = OpenAI(base_url=base_url, api_key="not-needed", timeout=timeout)
         self._model = model
 
     def call(

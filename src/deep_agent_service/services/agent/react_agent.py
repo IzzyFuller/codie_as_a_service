@@ -19,7 +19,6 @@ from deep_agent_service.core.protocols import (
 from deep_agent_service.services.memory.memory_service import MemoryService
 
 logger = logging.getLogger(__name__)
-logging.basicConfig(level=logging.DEBUG)
 
 
 class ReActAgent:

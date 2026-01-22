@@ -9,7 +9,7 @@ Both demonstrate per-user memory persistence.
 ## Prerequisites
 
 - Docker installed and running
-- Poetry dependencies installed: `poetry install --with demo` (from repo root)
+- Main dependencies installed: `uv sync --no-dev` (from repo root)
 - `.env` file configured (see below)
 
 ## Option 1: HTTP Streaming Demo (Gradio UI)
@@ -17,7 +17,7 @@ Both demonstrate per-user memory persistence.
 From the **repo root**:
 
 ```bash
-./demo/start-demo.sh
+set -a && source .env && set +a && ./demo/run-http-demo.sh
 ```
 
 This single command:
@@ -35,7 +35,7 @@ Press `Ctrl+C` to stop all services.
 From the **repo root**:
 
 ```bash
-./demo/start-pubsub-demo.sh
+set -a && source .env && set +a && ./demo/run-pubsub-demo.sh
 ```
 
 This single command:
@@ -83,9 +83,14 @@ If you prefer to run services separately:
 ./scripts/start-local.sh
 ```
 
-**Terminal 2** - Start demo UI:
+**Terminal 2** - Start demo UI (preferred):
 ```bash
-poetry run python demo/app.py
+set -a && source .env && set +a && ./demo/run-http-demo.sh
+```
+
+Or for Pub/Sub CLI demo:
+```bash
+set -a && source .env && set +a && ./demo/run-pubsub-demo.sh
 ```
 
 ## Demo Features
@@ -113,7 +118,7 @@ Start Docker and try again.
 ```
 ModuleNotFoundError: No module named 'gradio'
 ```
-Run `poetry install --with demo` from repo root.
+Run `uv sync --no-dev` from repo root.
 
 **Port already in use:**
 Check for existing processes on ports 4443, 8080, or 7860.

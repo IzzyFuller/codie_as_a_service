@@ -63,7 +63,7 @@ echo ""
 
 # Start the HTTP service in background
 echo "Starting HTTP service..."
-poetry run python -m deep_agent_service.main_http &
+uv run python -m deep_agent_service.main_http &
 HTTP_PID=$!
 
 # Wait for HTTP service to be ready
@@ -81,7 +81,7 @@ done
 
 # Start the Gradio demo UI
 echo "Starting Gradio UI..."
-poetry run python demo/app.py &
+uv run python demo/app.py &
 DEMO_PID=$!
 
 echo ""

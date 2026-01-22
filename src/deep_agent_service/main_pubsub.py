@@ -28,11 +28,9 @@ class AgentApp:
     def __init__(
         self,
         memory_service: MemoryProtocol,
-        anthropic_client,
-        langfuse_client,
-        model: str,
+        llm_adapter,
+        prompt_adapter,
         prompt_names: list[str],
-        prompt_label: str,
         publisher: PubSubPublisher,
         subscriber: PubSubSubscriber,
         request_subscription_path: str,
@@ -41,11 +39,9 @@ class AgentApp:
         # Create handler that implements MessageHandler protocol
         handler = AgentMessageHandler(
             memory_service=memory_service,
-            anthropic_client=anthropic_client,
-            langfuse_client=langfuse_client,
-            model=model,
+            llm_adapter=llm_adapter,
+            prompt_adapter=prompt_adapter,
             prompt_names=prompt_names,
-            prompt_label=prompt_label,
             response_topic_path=response_topic_path,
             publisher=publisher,
         )
@@ -76,11 +72,9 @@ class AgentApp:
 
 def create_app(
     memory_service: MemoryProtocol,
-    anthropic_client,
-    langfuse_client,
-    model: str,
+    llm_adapter,
+    prompt_adapter,
     prompt_names: list[str],
-    prompt_label: str,
     publisher: PubSubPublisher,
     subscriber: PubSubSubscriber,
     request_subscription_path: str,
@@ -89,11 +83,9 @@ def create_app(
     """Factory function to create a configured AgentApp."""
     return AgentApp(
         memory_service=memory_service,
-        anthropic_client=anthropic_client,
-        langfuse_client=langfuse_client,
-        model=model,
+        llm_adapter=llm_adapter,
+        prompt_adapter=prompt_adapter,
         prompt_names=prompt_names,
-        prompt_label=prompt_label,
         publisher=publisher,
         subscriber=subscriber,
         request_subscription_path=request_subscription_path,
@@ -104,10 +96,10 @@ def create_app(
 def main() -> None:
     """Start the Pub/Sub message consumer."""
     # Lazy imports for production dependencies
-    from anthropic import Anthropic
     from google.cloud import pubsub_v1, storage
-    from langfuse import Langfuse
 
+    from deep_agent_service.adapters.llm.openai_adapter import OpenAILLMAdapter
+    from deep_agent_service.adapters.prompts.file_adapter import FilePromptAdapter
     from deep_agent_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
     from deep_agent_service.services.memory.memory_service import MemoryService
 
@@ -124,22 +116,22 @@ def main() -> None:
     if not response_topic_path:
         raise ValueError("PUBSUB_RESPONSE_TOPIC environment variable is required")
 
-    openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")
-    if not openrouter_api_key:
-        raise ValueError("OPENROUTER_API_KEY environment variable is required")
+    local_llm_url = os.environ.get("LOCAL_LLM_URL")
+    if not local_llm_url:
+        raise ValueError("LOCAL_LLM_URL environment variable is required")
 
-    openrouter_model = os.environ.get("OPENROUTER_MODEL")
-    if not openrouter_model:
-        raise ValueError("OPENROUTER_MODEL environment variable is required")
+    local_model_name = os.environ.get("LOCAL_MODEL_NAME")
+    if not local_model_name:
+        raise ValueError("LOCAL_MODEL_NAME environment variable is required")
+
+    prompts_dir = os.environ.get("PROMPTS_DIR")
+    if not prompts_dir:
+        raise ValueError("PROMPTS_DIR environment variable is required")
 
     prompt_names_str = os.environ.get("PROMPT_NAMES")
     if not prompt_names_str:
         raise ValueError("PROMPT_NAMES environment variable is required")
     prompt_names = [name.strip() for name in prompt_names_str.split(",")]
-
-    prompt_label = os.environ.get("LANGFUSE_PROMPT_LABEL")
-    if not prompt_label:
-        raise ValueError("LANGFUSE_PROMPT_LABEL environment variable is required")
 
     # Initialize GCP clients
     gcs_client = storage.Client()
@@ -149,12 +141,9 @@ def main() -> None:
     publisher = pubsub_v1.PublisherClient()
     subscriber = pubsub_v1.SubscriberClient()
 
-    # Initialize other clients
-    anthropic_client = Anthropic(
-        base_url="https://openrouter.ai/api",
-        api_key=openrouter_api_key,
-    )
-    langfuse_client = Langfuse()
+    # Initialize adapters
+    llm_adapter = OpenAILLMAdapter(base_url=local_llm_url, model=local_model_name)
+    prompt_adapter = FilePromptAdapter(prompts_dir=prompts_dir)
 
     # Build memory service
     memory_service = MemoryService(storage=GCSMemoryAdapter(bucket=bucket))
@@ -162,11 +151,9 @@ def main() -> None:
     # Create app
     app = create_app(
         memory_service=memory_service,
-        anthropic_client=anthropic_client,
-        langfuse_client=langfuse_client,
-        model=openrouter_model,
+        llm_adapter=llm_adapter,
+        prompt_adapter=prompt_adapter,
         prompt_names=prompt_names,
-        prompt_label=prompt_label,
         publisher=publisher,
         subscriber=subscriber,
         request_subscription_path=request_subscription_path,

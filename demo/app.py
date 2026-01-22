@@ -53,8 +53,11 @@ def chat(message: str, history: list[dict], user_id: str):
 
             full_response = ""
             for event_type, data in parse_sse_events(response):
-                if event_type == "text":
-                    full_response += data.get("content", "")
+                if event_type == "response":
+                    # Server sends structured response with response_text
+                    full_response = data.get("response_text") or data.get(
+                        "response", ""
+                    )
                     yield full_response
                 elif event_type == "error":
                     yield f"Error: {data.get('message', 'Unknown error')}"

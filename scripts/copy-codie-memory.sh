@@ -9,7 +9,7 @@
 set -e
 
 USER_ID="${1:-izzy}"
-CODIE_MEMORY_DIR="/home/izzy_fo/Codie/memory"
+CODIE_MEMORY_DIR="${CODIE_MEMORY_PATH:-/Users/izzyfuller/Codie/memory}"
 
 # Configuration
 GCS_EMULATOR_PORT=${GCS_EMULATOR_PORT:-4443}

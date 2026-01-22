@@ -5,15 +5,13 @@ import os
 from typing import Any, Generator
 
 import uvicorn
-from anthropic import Anthropic
 from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from google.cloud import storage
-from langfuse import Langfuse
 from pydantic import BaseModel
 
-from deep_agent_service.adapters.llm.anthropic_adapter import AnthropicLLMAdapter
-from deep_agent_service.adapters.prompts.langfuse_adapter import LangfusePromptAdapter
+from deep_agent_service.adapters.llm.openai_adapter import OpenAILLMAdapter
+from deep_agent_service.adapters.prompts.file_adapter import FilePromptAdapter
 from deep_agent_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
 from deep_agent_service.services.agent.react_agent import ReActAgent
 from deep_agent_service.services.memory.memory_service import MemoryService
@@ -30,10 +28,8 @@ class ChatRequest(BaseModel):
 
 def create_app(
     memory_service: MemoryService,
-    anthropic_client: Anthropic,
-    langfuse_client: Langfuse,
-    model: str,
-    prompt_label: str,
+    llm_adapter: OpenAILLMAdapter,
+    prompt_adapter: FilePromptAdapter,
     prompt_names: list[str],
 ) -> FastAPI:
     """
@@ -41,10 +37,8 @@ def create_app(
 
     Args:
         memory_service: Service for reading/writing user memory
-        anthropic_client: Anthropic SDK client for LLM calls
-        langfuse_client: Langfuse SDK client for prompt loading
-        model: Model identifier to use for LLM calls
-        prompt_label: Langfuse prompt label to use
+        llm_adapter: OpenAI-compatible LLM adapter
+        prompt_adapter: File-based prompt adapter
         prompt_names: List of prompt names to fetch and combine for system prompt
 
     Returns:
@@ -54,19 +48,24 @@ def create_app(
 
     # Initialize agent with adapters
     agent = ReActAgent(
-        llm=AnthropicLLMAdapter(client=anthropic_client, model=model),
-        prompts=LangfusePromptAdapter(client=langfuse_client, label=prompt_label),
+        llm=llm_adapter,
+        prompts=prompt_adapter,
         memory=memory_service,
         prompt_names=prompt_names,
     )
 
     def generate_sse_events(
-        user_id: str, session_id: str, message: str, output_format: dict[str, Any] | None = None
+        user_id: str,
+        session_id: str,
+        message: str,
+        output_format: dict[str, Any] | None = None,
     ) -> Generator[str, None, None]:
         """Generate SSE events for chat response."""
         try:
             # Process through agent (always returns dict)
-            response = agent.process(user_id=user_id, message=message, output_format=output_format)
+            response = agent.process(
+                user_id=user_id, message=message, output_format=output_format
+            )
 
             # Emit structured response
             yield f"event: response\ndata: {json.dumps(response)}\n\n"
@@ -90,7 +89,10 @@ def create_app(
         """
         return StreamingResponse(
             generate_sse_events(
-                request.user_id, request.session_id, request.message, request.output_format
+                request.user_id,
+                request.session_id,
+                request.message,
+                request.output_format,
             ),
             media_type="text/event-stream",
         )
@@ -114,17 +116,17 @@ def main() -> None:
         raise ValueError("HTTP_PORT environment variable is required")
     port = int(port_str)
 
-    openrouter_api_key = os.environ.get("OPENROUTER_API_KEY")
-    if not openrouter_api_key:
-        raise ValueError("OPENROUTER_API_KEY environment variable is required")
+    local_llm_url = os.environ.get("LOCAL_LLM_URL")
+    if not local_llm_url:
+        raise ValueError("LOCAL_LLM_URL environment variable is required")
 
-    openrouter_model = os.environ.get("OPENROUTER_MODEL")
-    if not openrouter_model:
-        raise ValueError("OPENROUTER_MODEL environment variable is required")
+    local_model_name = os.environ.get("LOCAL_MODEL_NAME")
+    if not local_model_name:
+        raise ValueError("LOCAL_MODEL_NAME environment variable is required")
 
-    langfuse_prompt_label = os.environ.get("LANGFUSE_PROMPT_LABEL")
-    if not langfuse_prompt_label:
-        raise ValueError("LANGFUSE_PROMPT_LABEL environment variable is required")
+    prompts_dir = os.environ.get("PROMPTS_DIR")
+    if not prompts_dir:
+        raise ValueError("PROMPTS_DIR environment variable is required")
 
     prompt_names_str = os.environ.get("PROMPT_NAMES")
     if not prompt_names_str:
@@ -135,11 +137,9 @@ def main() -> None:
     gcs_client = storage.Client()
     bucket = gcs_client.bucket(gcs_bucket_name)
 
-    anthropic_client = Anthropic(
-        base_url="https://openrouter.ai/api",
-        api_key=openrouter_api_key,
-    )
-    langfuse_client = Langfuse()
+    # Initialize adapters
+    llm_adapter = OpenAILLMAdapter(base_url=local_llm_url, model=local_model_name)
+    prompt_adapter = FilePromptAdapter(prompts_dir=prompts_dir)
 
     # Build memory service
     memory_service = MemoryService(storage=GCSMemoryAdapter(bucket=bucket))
@@ -147,10 +147,8 @@ def main() -> None:
     # Create and run app
     app = create_app(
         memory_service=memory_service,
-        anthropic_client=anthropic_client,
-        langfuse_client=langfuse_client,
-        model=openrouter_model,
-        prompt_label=langfuse_prompt_label,
+        llm_adapter=llm_adapter,
+        prompt_adapter=prompt_adapter,
         prompt_names=prompt_names,
     )
 

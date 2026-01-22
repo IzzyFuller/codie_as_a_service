@@ -109,7 +109,7 @@ curl -s -X POST "http://localhost:${GCS_EMULATOR_PORT}/storage/v1/b?project=loca
 
 # Create Pub/Sub infrastructure
 echo "Ensuring Pub/Sub infrastructure exists..."
-PUBSUB_EMULATOR_HOST="localhost:${PUBSUB_EMULATOR_PORT}" python3 << EOF
+PUBSUB_EMULATOR_HOST="localhost:${PUBSUB_EMULATOR_PORT}" uv run python << EOF
 import os
 os.environ["PUBSUB_EMULATOR_HOST"] = "localhost:${PUBSUB_EMULATOR_PORT}"
 

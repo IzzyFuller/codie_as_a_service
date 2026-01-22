@@ -34,7 +34,9 @@ class PubSubDemoClient:
         self._user_id = os.environ.get("DEMO_USER_ID", "demo-user")
         self._session_id = str(uuid.uuid4())
 
-    def send_message(self, message: str, timeout_seconds: int = 30) -> AgentResponse | None:
+    def send_message(
+        self, message: str, timeout_seconds: int = 30
+    ) -> AgentResponse | None:
         """Send a message and wait for response."""
         request = RunAgentRequest(
             user_id=self._user_id,
@@ -128,8 +130,14 @@ def main():
             response = client.send_message(user_input)
 
             if response:
-                status_indicator = "" if response.status == "success" else f" [{response.status}]"
-                print(f"\nAgent{status_indicator}: {response.response_text}\n")
+                status_indicator = (
+                    "" if response.status == "success" else f" [{response.status}]"
+                )
+                # Extract response_text from response_data dict
+                response_text = response.response_data.get(
+                    "response_text", str(response.response_data)
+                )
+                print(f"\nAgent{status_indicator}: {response_text}\n")
             else:
                 print("\n  [Timeout - no response received]\n")
 

@@ -66,7 +66,7 @@ echo ""
 
 # Start the agent service in background
 echo "Starting Pub/Sub agent service..."
-poetry run python -m deep_agent_service.main_pubsub &
+uv run python -m deep_agent_service.main_pubsub &
 AGENT_PID=$!
 
 # Give agent time to start
@@ -76,4 +76,4 @@ echo "Agent service running (PID: $AGENT_PID)"
 echo ""
 
 # Run CLI client in foreground
-poetry run python demo/pubsub_cli.py
+uv run python demo/pubsub_cli.py

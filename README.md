@@ -99,7 +99,7 @@ git clone https://github.com/IzzyFuller/deep_agent_service.git
 cd deep-agent-service
 
 # Install all dependencies (main + dev + demo)
-uv sync --all-groups
+uv sync
 
 # Set required environment variables
 export ANTHROPIC_API_KEY="your-key"
@@ -128,6 +128,10 @@ export MEMORY_BUCKET="gs://your-memory-bucket"
 ./demo/setup-infrastructure.sh
 
 # 2. Run the HTTP streaming demo with Gradio UI
+
+# Install only main dependencies (no dev):
+uv sync --no-dev
+
 ./demo/run-http-demo.sh
 # Opens at http://localhost:7860
 

@@ -3,18 +3,21 @@
 import json
 import os
 import subprocess
+import tempfile
 import time
 import uuid
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
-from anthropic import Anthropic
-from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
+from openai.types.chat import ChatCompletion, ChatCompletionMessage
+from openai.types.chat.chat_completion import Choice
 from google.cloud import firestore, storage
 from google.cloud import pubsub_v1
 
 from starlette.testclient import TestClient as StarletteTestClient
 
+from deep_agent_service.adapters.prompts.file_adapter import FilePromptAdapter
 from deep_agent_service.core.models import RunAgentRequest, AgentResponse
 from deep_agent_service.services.memory.memory_service import MemoryService
 from deep_agent_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
@@ -209,8 +212,8 @@ def memory_service(gcs_bucket):
 @pytest.fixture(scope="session")
 def agent_app(
     memory_service,
-    anthropic_client,
-    mock_langfuse_client,
+    openai_client,
+    file_prompt_adapter,
     pubsub_publisher,
     pubsub_subscriber,
     pubsub_infrastructure,
@@ -219,11 +222,9 @@ def agent_app(
     # GCP SubscriberClient directly implements PubSubSubscriber protocol (duck typing)
     app = create_app(
         memory_service=memory_service,
-        anthropic_client=anthropic_client,
-        langfuse_client=mock_langfuse_client,
-        model="test-model",
+        llm_adapter=openai_client,
+        prompt_adapter=file_prompt_adapter,
         prompt_names=["deep_agent_service_system"],
-        prompt_label="test",
         publisher=pubsub_publisher,
         subscriber=pubsub_subscriber,
         request_subscription_path=REQUEST_SUBSCRIPTION_PATH,
@@ -333,109 +334,141 @@ def create_test_session_with_user(memory_service):
 
 
 # ============================================================================
-# Anthropic SDK Fixtures
+# OpenAI SDK Fixtures
 # ============================================================================
 
 # Message counter for unique IDs
 _message_counter = 0
 
 
-def create_anthropic_message(
+def _create_openai_response(
     stop_reason: str,
-    content: list[TextBlock | ToolUseBlock],
-) -> Message:
-    """Factory for creating real Anthropic Message response objects.
+    content: str | None = None,
+    tool_calls: list[dict] | None = None,
+) -> ChatCompletion:
+    """Factory for creating real OpenAI ChatCompletion response objects.
 
     Use this in tests to build LLM responses. Tests configure
-    anthropic_client.messages.create.side_effect with a list of these.
+    openai_client.chat.completions.create.side_effect with a list of these.
 
     Args:
-        stop_reason: "end_turn" or "tool_use"
-        content: List of TextBlock/ToolUseBlock objects
+        stop_reason: "stop" or "tool_calls"
+        content: Text response content
+        tool_calls: List of tool call objects (OpenAI format)
 
     Example:
-        response = create_anthropic_message(
-            stop_reason="end_turn",
-            content=[TextBlock(type="text", text="Hello!")]
+        response = _create_openai_response(
+            stop_reason="stop",
+            content="Hello!"
         )
-        anthropic_client.messages.create.return_value = response
+        openai_client.chat.completions.create.return_value = response
     """
     global _message_counter
     _message_counter += 1
 
-    return Message(
-        id=f"msg_test_{_message_counter}",
-        content=content,
-        model="claude-sonnet-4-20250514",
-        role="assistant",
-        stop_reason=stop_reason,
-        stop_sequence=None,
-        type="message",
-        usage=Usage(
-            input_tokens=100,
-            output_tokens=50,
-            cache_creation_input_tokens=0,
-            cache_read_input_tokens=0,
-        ),
+    # Build the message content
+    message_data = {
+        "role": "assistant",
+        "content": content,
+    }
+    if tool_calls:
+        message_data["tool_calls"] = tool_calls
+
+    message = ChatCompletionMessage(**message_data)
+
+    # Map domain stop_reason to OpenAI finish_reason
+    finish_reason_mapping = {
+        "end_turn": "stop",
+        "tool_use": "tool_calls",
+        "max_tokens": "length",
+    }
+    finish_reason = finish_reason_mapping.get(stop_reason, "stop")
+
+    choice = Choice(
+        index=0,
+        message=message,
+        finish_reason=finish_reason,
+        logprobs=None,
+    )
+
+    return ChatCompletion(
+        id=f"chatcmpl_test_{_message_counter}",
+        object="chat.completion",
+        created=int(time.time()),
+        model="gpt-4",
+        choices=[choice],
+        usage={
+            "prompt_tokens": 100,
+            "completion_tokens": 50,
+            "total_tokens": 150,
+        },
     )
 
 
 @pytest.fixture(scope="session")
-def anthropic_client():
-    """Real Anthropic client with only messages.create mocked.
+def create_openai_response():
+    """Fixture that returns the response factory function for use in tests."""
+    return _create_openai_response
+
+
+@pytest.fixture(scope="session")
+def openai_client():
+    """Real OpenAI adapter with only chat.completions.create mocked.
 
     Tests configure the mock's return_value or side_effect as needed:
-        anthropic_client.messages.create.return_value = create_anthropic_message(...)
-        anthropic_client.messages.create.side_effect = [response1, response2]
+        openai_client._client.chat.completions.create.return_value = create_openai_response(...)
+        openai_client._client.chat.completions.create.side_effect = [response1, response2]
+
+    This follows the same pattern as the old Anthropic adapter testing:
+    use real adapter, mock only the network call.
     """
-    client = Anthropic(api_key="test-key-for-testing")
+    from deep_agent_service.adapters.llm.openai_adapter import OpenAILLMAdapter
+
+    # Create real adapter (base_url doesn't matter since we mock the network call)
+    adapter = OpenAILLMAdapter(base_url="http://localhost:8080/v1", model="test-model")
+
     # Only mock the method that would hit the network
-    client.messages.create = MagicMock()
+    adapter._client.chat.completions.create = MagicMock()
 
     # Default response for tests that don't configure their own
-    client.messages.create.return_value = create_anthropic_message(
+    adapter._client.chat.completions.create.return_value = _create_openai_response(
         stop_reason="end_turn",
-        content=[TextBlock(type="text", text="I'm ready to help you.")],
+        content="I'm ready to help you.",
     )
 
-    return client
+    return adapter
 
 
 @pytest.fixture(scope="session")
-def mock_langfuse_client():
-    """Create a mock Langfuse client that returns test prompts."""
-    mock_client = MagicMock()
+def file_prompt_adapter():
+    """Create FilePromptAdapter with test prompts in temporary directory."""
+    # Create temporary prompts directory
+    temp_dir = tempfile.mkdtemp(prefix="test_prompts_")
+    prompts_path = Path(temp_dir)
 
-    def mock_get_prompt(name: str, label: str = "development"):
-        """Return mock prompts based on name."""
-        mock_prompt = MagicMock()
+    # Define test prompts - using variables that ReActAgent actually passes
+    # (me, context_anchors, current_session)
+    test_prompts = {
+        "deep_agent_service_system.txt": (
+            "You are a helpful AI assistant with access to user memory. "
+            "Identity: {me}. Context: {context_anchors}. Session: {current_session}. "
+            "You can read and write to the user's memory using the provided tools."
+        ),
+    }
 
-        # Define test prompts - using variables that ReActAgent actually passes
-        # (me, context_anchors, current_session)
-        prompts = {
-            "deep_agent_service_system": (
-                "You are a helpful AI assistant with access to user memory. "
-                "Identity: {me}. Context: {context_anchors}. Session: {current_session}. "
-                "You can read and write to the user's memory using the provided tools."
-            ),
-        }
+    # Write test prompt files
+    for filename, content in test_prompts.items():
+        prompt_file = prompts_path / filename
+        prompt_file.write_text(content, encoding="utf-8")
 
-        prompt_text = prompts.get(name, "Default test prompt")
+    # Create and return FilePromptAdapter
+    adapter = FilePromptAdapter(prompts_dir=prompts_path)
+    yield adapter
 
-        def mock_compile(**variables):
-            """Handle template variable injection."""
-            if variables:
-                return prompt_text.format(**variables)
-            return prompt_text
+    # Cleanup: remove temp directory after tests
+    import shutil
 
-        mock_prompt.compile = mock_compile
-        mock_prompt.prompt = prompt_text
-
-        return mock_prompt
-
-    mock_client.get_prompt = mock_get_prompt
-
-    return mock_client
+    shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 # ============================================================================
@@ -477,16 +510,14 @@ def sample_memory_content() -> str:
 @pytest.fixture(scope="session")
 def http_app(
     memory_service,
-    anthropic_client,
-    mock_langfuse_client,
+    openai_client,
+    file_prompt_adapter,
 ):
     """Create FastAPI HTTP app for E2E tests."""
     app = create_http_app(
         memory_service=memory_service,
-        anthropic_client=anthropic_client,
-        langfuse_client=mock_langfuse_client,
-        model="test-model",
-        prompt_label="test",
+        llm_adapter=openai_client,
+        prompt_adapter=file_prompt_adapter,
         prompt_names=["deep_agent_service_system"],
     )
     return app

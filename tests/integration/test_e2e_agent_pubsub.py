@@ -9,33 +9,10 @@ Tests describe the system from a CLIENT perspective:
 Mocking Strategy:
 - Real Pub/Sub emulator (Docker)
 - Real GCS emulator for memory
-- The APP (not tests) will use mocked Anthropic/Langfuse SDKs
+- The APP (not tests) will use mocked OpenAI/Langfuse SDKs
 """
 
 import pytest
-from anthropic.types import Message, TextBlock, Usage
-
-
-def create_anthropic_message(
-    stop_reason: str,
-    content: list[TextBlock],
-) -> Message:
-    """Create Anthropic Message for configuring mock responses."""
-    return Message(
-        id="msg_test",
-        content=content,
-        model="test-model",
-        role="assistant",
-        stop_reason=stop_reason,
-        stop_sequence=None,
-        type="message",
-        usage=Usage(
-            input_tokens=10,
-            output_tokens=10,
-            cache_creation_input_tokens=0,
-            cache_read_input_tokens=0,
-        ),
-    )
 
 
 @pytest.mark.integration
@@ -46,7 +23,8 @@ class TestE2EAgentPubSub:
         self,
         agent_app,
         test_client,
-        anthropic_client,
+        openai_client,
+        create_openai_response,
         create_test_session_with_user,
     ):
         """
@@ -57,16 +35,16 @@ class TestE2EAgentPubSub:
         user_id, session_id = create_test_session_with_user()
 
         # Configure mock for two-phase approach (ReAct loop + structure output)
-        anthropic_client.messages.create.side_effect = [
+        openai_client._client.chat.completions.create.side_effect = [
             # Phase 1: ReAct loop response
-            create_anthropic_message(
+            create_openai_response(
                 stop_reason="end_turn",
-                content=[TextBlock(type="text", text="I'm ready to help you.")],
+                content="I'm ready to help you.",
             ),
             # Phase 2: Default structured output format
-            create_anthropic_message(
+            create_openai_response(
                 stop_reason="end_turn",
-                content=[TextBlock(type="text", text='{"response": "I\'m ready to help you."}')],
+                content='{"response": "I\'m ready to help you."}',
             ),
         ]
 
@@ -80,10 +58,12 @@ class TestE2EAgentPubSub:
         assert response.status == "success"
 
         # Reset mock for other tests
-        anthropic_client.messages.create.side_effect = None
-        anthropic_client.messages.create.return_value = create_anthropic_message(
-            stop_reason="end_turn",
-            content=[TextBlock(type="text", text="I'm ready to help you.")],
+        openai_client._client.chat.completions.create.side_effect = None
+        openai_client._client.chat.completions.create.return_value = (
+            create_openai_response(
+                stop_reason="end_turn",
+                content="I'm ready to help you.",
+            )
         )
 
     def test_receive_error_response_when_processing_fails(
@@ -108,7 +88,8 @@ class TestE2EAgentPubSub:
         self,
         agent_app,
         test_client,
-        anthropic_client,
+        openai_client,
+        create_openai_response,
         create_test_session_with_user,
     ):
         """
@@ -119,16 +100,16 @@ class TestE2EAgentPubSub:
         user_id, session_id = create_test_session_with_user()
 
         # Configure mock to return text from ReAct loop, then JSON in structured output phase
-        anthropic_client.messages.create.side_effect = [
+        openai_client._client.chat.completions.create.side_effect = [
             # Phase 1: ReAct loop response
-            create_anthropic_message(
+            create_openai_response(
                 stop_reason="end_turn",
-                content=[TextBlock(type="text", text="Jane is 30 years old")],
+                content="Jane is 30 years old",
             ),
             # Phase 2: Structured output response
-            create_anthropic_message(
+            create_openai_response(
                 stop_reason="end_turn",
-                content=[TextBlock(type="text", text='{"name": "Jane", "age": 30}')],
+                content='{"name": "Jane", "age": 30}',
             ),
         ]
 
@@ -162,8 +143,10 @@ class TestE2EAgentPubSub:
         assert response.response_data["age"] == 30
 
         # Reset mock for other tests
-        anthropic_client.messages.create.side_effect = None
-        anthropic_client.messages.create.return_value = create_anthropic_message(
-            stop_reason="end_turn",
-            content=[TextBlock(type="text", text="I'm ready to help you.")],
+        openai_client._client.chat.completions.create.side_effect = None
+        openai_client._client.chat.completions.create.return_value = (
+            create_openai_response(
+                stop_reason="end_turn",
+                content="I'm ready to help you.",
+            )
         )

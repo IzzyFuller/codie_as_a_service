@@ -1,6 +1,7 @@
 """ReAct Agent - Reason, Act, Observe loop."""
 
 import json
+import logging
 from typing import Any
 
 from deep_agent_service.core.models import (
@@ -16,6 +17,9 @@ from deep_agent_service.core.protocols import (
     PromptProtocol,
 )
 from deep_agent_service.services.memory.memory_service import MemoryService
+
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 
 class ReActAgent:
@@ -162,22 +166,59 @@ class ReActAgent:
         messages = [
             Message(
                 role="user",
-                content=f"Extract and format the following information according to the schema:\n\n{text_result}",
+                content=f'Return ONLY valid JSON matching this schema: {{"response": "<your response>"}}.\n\nContent to format:\n{text_result}',
             )
         ]
 
         response = self._llm.call(
             messages=messages,
-            system_prompt="You are a data extraction assistant. Return the information in the exact format requested.",
+            system_prompt='You are a JSON formatter. Return ONLY valid JSON, no other text. Example: {"response": "Hello!"}',
             tools=None,
             output_format=output_format,
         )
 
-        for block in response.content:
+        logger.debug(
+            f"_structure_output: response.content has {len(response.content)} blocks"
+        )
+        for i, block in enumerate(response.content):
+            logger.debug(f"_structure_output: block {i} type={type(block).__name__}")
             if isinstance(block, ContentBlock):
-                return json.loads(block.text)
+                text = block.text.strip()
+                logger.debug(
+                    f"_structure_output: block text (first 200 chars): {text[:200]!r}"
+                )
+                # Try direct JSON parse
+                try:
+                    result = json.loads(text)
+                    logger.debug("_structure_output: JSON parse SUCCESS")
+                    return result
+                except json.JSONDecodeError as e:
+                    logger.debug(f"_structure_output: JSON parse failed: {e}")
+                # Try extracting JSON from markdown code blocks
+                if "```" in text:
+                    import re
 
-        raise ValueError("No content in structured output response")
+                    match = re.search(
+                        r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL
+                    )
+                    if match:
+                        try:
+                            result = json.loads(match.group(1))
+                            logger.debug(
+                                "_structure_output: markdown JSON parse SUCCESS"
+                            )
+                            return result
+                        except json.JSONDecodeError as e:
+                            logger.debug(
+                                f"_structure_output: markdown JSON parse failed: {e}"
+                            )
+                # Fallback: wrap raw text in expected format
+                logger.debug("_structure_output: using fallback wrapper")
+                return {"response": text_result, "response_text": text_result}
+
+        # No content at all - return the original text
+        logger.debug("_structure_output: no ContentBlock found, using fallback")
+        return {"response": text_result, "response_text": text_result}
 
     def _get_tool_definitions(self) -> list[ToolDefinition]:
         """Get available tool definitions."""

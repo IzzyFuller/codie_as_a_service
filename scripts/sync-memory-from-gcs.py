@@ -66,12 +66,14 @@ def parse_session_notes(content: str) -> list[dict]:
 
     for match in re.finditer(pattern, content, re.DOTALL):
         note_type, importance, timestamp, note_content = match.groups()
-        notes.append({
-            "type": note_type.lower(),
-            "importance": importance.lower(),
-            "timestamp": timestamp,
-            "content": note_content.strip(),
-        })
+        notes.append(
+            {
+                "type": note_type.lower(),
+                "importance": importance.lower(),
+                "timestamp": timestamp,
+                "content": note_content.strip(),
+            }
+        )
 
     return notes
 
@@ -87,7 +89,9 @@ def find_new_notes(gcs_notes: list[dict], local_notes: list[dict]) -> list[dict]
 
 def main():
     parser = argparse.ArgumentParser(description="Sync session notes from GCS to local")
-    parser.add_argument("user_id", nargs="?", default="izzy", help="GCS user ID (default: izzy)")
+    parser.add_argument(
+        "user_id", nargs="?", default="izzy", help="GCS user ID (default: izzy)"
+    )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     args = parser.parse_args()
 
@@ -106,7 +110,9 @@ def main():
     gcs_notes = parse_session_notes(gcs_content)
     local_notes = parse_session_notes(local_content)
 
-    print(f"GCS notes: {len(gcs_notes)}, Local notes: {len(local_notes)}", file=sys.stderr)
+    print(
+        f"GCS notes: {len(gcs_notes)}, Local notes: {len(local_notes)}", file=sys.stderr
+    )
 
     # Find new notes
     new_notes = find_new_notes(gcs_notes, local_notes)
@@ -121,8 +127,10 @@ def main():
         print(json.dumps(new_notes, indent=2))
     else:
         for note in new_notes:
-            print(f"### {note['type'].upper()} - {note['importance'].upper()} ({note['timestamp']})")
-            print(note['content'])
+            print(
+                f"### {note['type'].upper()} - {note['importance'].upper()} ({note['timestamp']})"
+            )
+            print(note["content"])
             print()
 
 

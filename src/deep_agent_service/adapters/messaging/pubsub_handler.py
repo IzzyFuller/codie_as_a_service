@@ -8,8 +8,8 @@ from synapse.protocols.publisher import PubSubPublisher
 from deep_agent_service.core.models import RunAgentRequest, AgentResponse
 from deep_agent_service.services.memory.memory_service import MemoryService
 from deep_agent_service.services.agent.react_agent import ReActAgent
-from deep_agent_service.adapters.llm.anthropic_adapter import AnthropicLLMAdapter
-from deep_agent_service.adapters.prompts.langfuse_adapter import LangfusePromptAdapter
+from deep_agent_service.adapters.llm.openai_adapter import OpenAILLMAdapter
+from deep_agent_service.adapters.prompts.file_adapter import FilePromptAdapter
 
 
 class AgentMessageHandler:
@@ -23,11 +23,9 @@ class AgentMessageHandler:
     def __init__(
         self,
         memory_service: MemoryService,
-        anthropic_client,
-        langfuse_client,
-        model: str,
+        llm_adapter: OpenAILLMAdapter,
+        prompt_adapter: FilePromptAdapter,
         prompt_names: list[str],
-        prompt_label: str,
         response_topic_path: str,
         publisher: PubSubPublisher,
     ):
@@ -36,11 +34,9 @@ class AgentMessageHandler:
 
         Args:
             memory_service: Service for reading/writing user memory
-            anthropic_client: Anthropic SDK client for LLM calls
-            langfuse_client: Langfuse SDK client for prompt loading
-            model: Model identifier for LLM calls
+            llm_adapter: OpenAI-compatible LLM adapter
+            prompt_adapter: File-based prompt adapter
             prompt_names: List of prompt names to fetch and combine for system prompt
-            prompt_label: Langfuse prompt label (e.g., development, staging, production)
             response_topic_path: Pub/Sub topic path for publishing responses
             publisher: Pub/Sub publisher client
         """
@@ -50,8 +46,8 @@ class AgentMessageHandler:
 
         # Initialize agent with adapters
         self.agent = ReActAgent(
-            llm=AnthropicLLMAdapter(client=anthropic_client, model=model),
-            prompts=LangfusePromptAdapter(client=langfuse_client, label=prompt_label),
+            llm=llm_adapter,
+            prompts=prompt_adapter,
             memory=memory_service,
             prompt_names=prompt_names,
         )

@@ -8,33 +8,11 @@ Tests describe the system from a CLIENT perspective:
 
 Mocking Strategy:
 - Real GCS emulator for memory (Docker)
-- The APP (not tests) will use mocked Anthropic/Langfuse SDKs
+- The APP (not tests) will use mocked OpenAI/Langfuse SDKs
 """
 
+import json
 import pytest
-from anthropic.types import Message, TextBlock, ToolUseBlock, Usage
-
-
-def create_anthropic_message(
-    stop_reason: str,
-    content: list[TextBlock | ToolUseBlock],
-) -> Message:
-    """Create Anthropic Message for configuring mock responses."""
-    return Message(
-        id="msg_test",
-        content=content,
-        model="test-model",
-        role="assistant",
-        stop_reason=stop_reason,
-        stop_sequence=None,
-        type="message",
-        usage=Usage(
-            input_tokens=10,
-            output_tokens=10,
-            cache_creation_input_tokens=0,
-            cache_read_input_tokens=0,
-        ),
-    )
 
 
 @pytest.mark.integration
@@ -45,7 +23,8 @@ class TestE2EHTTPChat:
         self,
         http_app,
         http_test_client,
-        anthropic_client,
+        openai_client,
+        create_openai_response,
         create_test_session_with_user,
     ):
         """
@@ -56,16 +35,16 @@ class TestE2EHTTPChat:
         user_id, session_id = create_test_session_with_user()
 
         # Configure mock to return text from ReAct loop, then default JSON format
-        anthropic_client.messages.create.side_effect = [
+        openai_client._client.chat.completions.create.side_effect = [
             # Phase 1: ReAct loop response
-            create_anthropic_message(
+            create_openai_response(
                 stop_reason="end_turn",
-                content=[TextBlock(type="text", text="I'm ready to help you.")],
+                content="I'm ready to help you.",
             ),
             # Phase 2: Default structured output format {"response": "text"}
-            create_anthropic_message(
+            create_openai_response(
                 stop_reason="end_turn",
-                content=[TextBlock(type="text", text='{"response": "I\'m ready to help you."}')],
+                content='{"response": "I\'m ready to help you."}',
             ),
         ]
 
@@ -81,17 +60,21 @@ class TestE2EHTTPChat:
         # Response event should have default structured format
         response_data = response_events[0]["data"]
         assert isinstance(response_data, dict), "Response should be structured dict"
-        assert "response" in response_data, "Response should have 'response' field (default format)"
+        assert "response" in response_data, (
+            "Response should have 'response' field (default format)"
+        )
 
         # Done event should have usage stats
         done_data = done_events[0]["data"]
         assert "usage" in done_data
 
         # Reset mock for other tests
-        anthropic_client.messages.create.side_effect = None
-        anthropic_client.messages.create.return_value = create_anthropic_message(
-            stop_reason="end_turn",
-            content=[TextBlock(type="text", text="I'm ready to help you.")],
+        openai_client._client.chat.completions.create.side_effect = None
+        openai_client._client.chat.completions.create.return_value = (
+            create_openai_response(
+                stop_reason="end_turn",
+                content="I'm ready to help you.",
+            )
         )
 
     def test_chat_returns_error_for_nonexistent_user(
@@ -119,7 +102,8 @@ class TestE2EHTTPChat:
         self,
         http_app,
         http_test_client,
-        anthropic_client,
+        openai_client,
+        create_openai_response,
         memory_service,
         create_test_session_with_user,
     ):
@@ -135,32 +119,36 @@ class TestE2EHTTPChat:
         user_id, session_id = create_test_session_with_user()
 
         # Configure mock to simulate agent using write_memory tool + structure output
-        anthropic_client.messages.create.side_effect = [
+        openai_client._client.chat.completions.create.side_effect = [
             # Phase 1: ReAct loop - tool use
-            create_anthropic_message(
+            create_openai_response(
                 stop_reason="tool_use",
-                content=[
-                    TextBlock(type="text", text="I'll save that preference."),
-                    ToolUseBlock(
-                        type="tool_use",
-                        id="tool_write_1",
-                        name="write_memory",
-                        input={
-                            "key": "current_session",
-                            "content": "# Session\n\nUser prefers dark mode.",
+                content="I'll save that preference.",
+                tool_calls=[
+                    {
+                        "id": "tool_write_1",
+                        "type": "function",
+                        "function": {
+                            "name": "write_memory",
+                            "arguments": json.dumps(
+                                {
+                                    "key": "current_session",
+                                    "content": "# Session\n\nUser prefers dark mode.",
+                                }
+                            ),
                         },
-                    ),
+                    }
                 ],
             ),
             # Phase 1: ReAct loop - final response
-            create_anthropic_message(
+            create_openai_response(
                 stop_reason="end_turn",
-                content=[TextBlock(type="text", text="Got it!")],
+                content="Got it!",
             ),
             # Phase 2: Default structured output format
-            create_anthropic_message(
+            create_openai_response(
                 stop_reason="end_turn",
-                content=[TextBlock(type="text", text='{"response": "Got it!"}')],
+                content='{"response": "Got it!"}',
             ),
         ]
 
@@ -178,17 +166,20 @@ class TestE2EHTTPChat:
         assert "dark mode" in content
 
         # Reset mock for other tests
-        anthropic_client.messages.create.side_effect = None
-        anthropic_client.messages.create.return_value = create_anthropic_message(
-            stop_reason="end_turn",
-            content=[TextBlock(type="text", text="I'm ready to help you.")],
+        openai_client._client.chat.completions.create.side_effect = None
+        openai_client._client.chat.completions.create.return_value = (
+            create_openai_response(
+                stop_reason="end_turn",
+                content="I'm ready to help you.",
+            )
         )
 
     def test_agent_reads_memory_when_tool_is_used(
         self,
         http_app,
         http_test_client,
-        anthropic_client,
+        openai_client,
+        create_openai_response,
         memory_service,
         create_test_session_with_user,
     ):
@@ -211,29 +202,31 @@ class TestE2EHTTPChat:
         )
 
         # Configure mock to simulate agent using read_memory tool + structure output
-        anthropic_client.messages.create.side_effect = [
+        openai_client._client.chat.completions.create.side_effect = [
             # Phase 1: ReAct loop - tool use
-            create_anthropic_message(
+            create_openai_response(
                 stop_reason="tool_use",
-                content=[
-                    TextBlock(type="text", text="Let me check."),
-                    ToolUseBlock(
-                        type="tool_use",
-                        id="tool_read_1",
-                        name="read_memory",
-                        input={"key": "current_session"},
-                    ),
+                content="Let me check.",
+                tool_calls=[
+                    {
+                        "id": "tool_read_1",
+                        "type": "function",
+                        "function": {
+                            "name": "read_memory",
+                            "arguments": json.dumps({"key": "current_session"}),
+                        },
+                    }
                 ],
             ),
             # Phase 1: ReAct loop - final response
-            create_anthropic_message(
+            create_openai_response(
                 stop_reason="end_turn",
-                content=[TextBlock(type="text", text="You're on PROJECT_ALPHA.")],
+                content="You're on PROJECT_ALPHA.",
             ),
             # Phase 2: Default structured output format
-            create_anthropic_message(
+            create_openai_response(
                 stop_reason="end_turn",
-                content=[TextBlock(type="text", text='{"response": "You\'re on PROJECT_ALPHA."}')],
+                content='{"response": "You\'re on PROJECT_ALPHA."}',
             ),
         ]
 
@@ -245,17 +238,20 @@ class TestE2EHTTPChat:
         assert len(done_events) == 1
 
         # Reset mock for other tests
-        anthropic_client.messages.create.side_effect = None
-        anthropic_client.messages.create.return_value = create_anthropic_message(
-            stop_reason="end_turn",
-            content=[TextBlock(type="text", text="I'm ready to help you.")],
+        openai_client._client.chat.completions.create.side_effect = None
+        openai_client._client.chat.completions.create.return_value = (
+            create_openai_response(
+                stop_reason="end_turn",
+                content="I'm ready to help you.",
+            )
         )
 
     def test_agent_stops_at_max_iterations(
         self,
         http_app,
         http_test_client,
-        anthropic_client,
+        openai_client,
+        create_openai_response,
         create_test_session_with_user,
     ):
         """
@@ -270,27 +266,29 @@ class TestE2EHTTPChat:
 
         # Configure mock to always request tool use (infinite loop scenario) + final structure
         # The ReAct loop will hit max iterations, then structure output needs one more mock
-        tool_use_response = create_anthropic_message(
+        tool_use_response = create_openai_response(
             stop_reason="tool_use",
-            content=[
-                TextBlock(type="text", text="Let me check more..."),
-                ToolUseBlock(
-                    type="tool_use",
-                    id="tool_loop",
-                    name="read_memory",
-                    input={"key": "current_session"},
-                ),
+            content="Let me check more...",
+            tool_calls=[
+                {
+                    "id": "tool_loop",
+                    "type": "function",
+                    "function": {
+                        "name": "read_memory",
+                        "arguments": json.dumps({"key": "current_session"}),
+                    },
+                }
             ],
         )
 
-        # Set up mock to return tool_use repeatedly during ReAct loop, then structure output
-        # max_iterations defaults to 10, so 10 tool_use responses + 1 structure output
-        anthropic_client.messages.create.side_effect = (
+        # Set up mock to return tool_calls repeatedly during ReAct loop, then structure output
+        # max_iterations defaults to 10, so 10 tool_calls responses + 1 structure output
+        openai_client._client.chat.completions.create.side_effect = (
             [tool_use_response] * 10  # Hit max_iterations exactly
             + [
-                create_anthropic_message(
+                create_openai_response(
                     stop_reason="end_turn",
-                    content=[TextBlock(type="text", text='{"response": "I couldn\'t complete the request."}')],
+                    content='{"response": "I couldn\'t complete the request."}',
                 )
             ]
         )
@@ -303,20 +301,23 @@ class TestE2EHTTPChat:
         assert len(done_events) == 1
 
         # Verify multiple iterations occurred
-        assert anthropic_client.messages.create.call_count >= 3
+        assert openai_client._client.chat.completions.create.call_count >= 3
 
         # Reset mock for other tests
-        anthropic_client.messages.create.side_effect = None
-        anthropic_client.messages.create.return_value = create_anthropic_message(
-            stop_reason="end_turn",
-            content=[TextBlock(type="text", text="I'm ready to help you.")],
+        openai_client._client.chat.completions.create.side_effect = None
+        openai_client._client.chat.completions.create.return_value = (
+            create_openai_response(
+                stop_reason="end_turn",
+                content="I'm ready to help you.",
+            )
         )
 
     def test_structured_output_returns_structured_event(
         self,
         http_app,
         http_test_client,
-        anthropic_client,
+        openai_client,
+        create_openai_response,
         create_test_session_with_user,
     ):
         """
@@ -327,16 +328,16 @@ class TestE2EHTTPChat:
         user_id, session_id = create_test_session_with_user()
 
         # Configure mock to return text from ReAct loop, then JSON in structured output phase
-        anthropic_client.messages.create.side_effect = [
+        openai_client._client.chat.completions.create.side_effect = [
             # Phase 1: ReAct loop response
-            create_anthropic_message(
+            create_openai_response(
                 stop_reason="end_turn",
-                content=[TextBlock(type="text", text="John's email is [email protected]")],
+                content="John's email is [email protected]",
             ),
             # Phase 2: Structured output response
-            create_anthropic_message(
+            create_openai_response(
                 stop_reason="end_turn",
-                content=[TextBlock(type="text", text='{"name": "John", "email": "[email protected]"}')],
+                content='{"name": "John", "email": "[email protected]"}',
             ),
         ]
 
@@ -374,17 +375,20 @@ class TestE2EHTTPChat:
         assert response_data["email"] == "[email protected]"
 
         # Reset mock for other tests
-        anthropic_client.messages.create.side_effect = None
-        anthropic_client.messages.create.return_value = create_anthropic_message(
-            stop_reason="end_turn",
-            content=[TextBlock(type="text", text="I'm ready to help you.")],
+        openai_client._client.chat.completions.create.side_effect = None
+        openai_client._client.chat.completions.create.return_value = (
+            create_openai_response(
+                stop_reason="end_turn",
+                content="I'm ready to help you.",
+            )
         )
 
     def test_structured_output_with_empty_response_returns_error(
         self,
         http_app,
         http_test_client,
-        anthropic_client,
+        openai_client,
+        create_openai_response,
         create_test_session_with_user,
     ):
         """
@@ -395,16 +399,16 @@ class TestE2EHTTPChat:
         user_id, session_id = create_test_session_with_user()
 
         # Configure mock to return text in ReAct loop, then empty content in structure phase
-        anthropic_client.messages.create.side_effect = [
+        openai_client._client.chat.completions.create.side_effect = [
             # Phase 1: ReAct loop response
-            create_anthropic_message(
+            create_openai_response(
                 stop_reason="end_turn",
-                content=[TextBlock(type="text", text="Some text result")],
+                content="Some text result",
             ),
             # Phase 2: Structured output response (empty - error case)
-            create_anthropic_message(
+            create_openai_response(
                 stop_reason="end_turn",
-                content=[],  # Empty content - should trigger error
+                content=None,  # Empty content - should trigger error
             ),
         ]
 
@@ -430,8 +434,10 @@ class TestE2EHTTPChat:
         assert len(error_events) == 1, "Expected exactly one error event"
 
         # Reset mock for other tests
-        anthropic_client.messages.create.side_effect = None
-        anthropic_client.messages.create.return_value = create_anthropic_message(
-            stop_reason="end_turn",
-            content=[TextBlock(type="text", text="I'm ready to help you.")],
+        openai_client._client.chat.completions.create.side_effect = None
+        openai_client._client.chat.completions.create.return_value = (
+            create_openai_response(
+                stop_reason="end_turn",
+                content="I'm ready to help you.",
+            )
         )

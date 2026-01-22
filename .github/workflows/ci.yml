@@ -33,24 +33,13 @@ jobs:
         run: uv sync --all-groups
 
       - name: Run tests with coverage
-        run: |
-          uv run pytest --cov=src/codie_as_a_service --cov-report=xml --cov-report=term-missing
-          COVERAGE=$(uv run coverage report --format=total)
-          echo "COVERAGE=$COVERAGE" >> $GITHUB_ENV
+        run: uv run pytest --cov=src/codie_as_a_service --cov-report=xml --cov-report=term-missing
 
-      - name: Create coverage badge
-        if: github.ref == 'refs/heads/main'
-        continue-on-error: true
-        uses: schneegans/dynamic-badges-action@v1.7.0
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
         with:
-          auth: ${{ secrets.GIST_TOKEN }}
-          gistID: 100b39151bc1c8397fb6a684ade5e588
-          filename: coverage.json
-          label: coverage
-          message: ${{ env.COVERAGE }}%
-          valColorRange: ${{ env.COVERAGE }}
-          maxColorRange: 100
-          minColorRange: 0
+          files: ./coverage.xml
+          fail_ci_if_error: false
 
   lint:
     runs-on: ubuntu-latest

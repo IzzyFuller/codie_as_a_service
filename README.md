@@ -1,7 +1,7 @@
 # Codie-as-a-Service
 
 ![CI](https://github.com/IzzyFuller/codie_as_a_service/workflows/CI/badge.svg)
-[![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/IzzyFuller/100b39151bc1c8397fb6a684ade5e588/raw/coverage.json)](https://gist.github.com/IzzyFuller/100b39151bc1c8397fb6a684ade5e588)
+[![codecov](https://codecov.io/gh/IzzyFuller/codie_as_a_service/branch/main/graph/badge.svg)](https://codecov.io/gh/IzzyFuller/codie_as_a_service)
 ![Python](https://img.shields.io/badge/python-3.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 

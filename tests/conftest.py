@@ -353,8 +353,11 @@ def llm_adapter():
     mock_tokenizer = MagicMock()
     mock_model = MagicMock()
 
-    # Configure tokenizer
-    mock_tokenizer.apply_chat_template.return_value = torch.tensor([[1, 2, 3]])
+    # Configure tokenizer - return dict with input_ids and attention_mask (return_dict=True)
+    mock_tokenizer.apply_chat_template.return_value = {
+        "input_ids": torch.tensor([[1, 2, 3]]),
+        "attention_mask": torch.tensor([[1, 1, 1]]),
+    }
     mock_tokenizer.eos_token_id = 0
     mock_tokenizer.decode.return_value = "I'm ready to help you."
 

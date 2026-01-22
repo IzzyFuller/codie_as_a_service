@@ -61,19 +61,23 @@ echo "  Press Ctrl+C to stop"
 echo "==========================================="
 echo ""
 
+# Ensure demo dependencies are installed
+uv sync --group demo --quiet
+
 # Start the HTTP service in background
+# UV_NO_SYNC=1 prevents uv bug where torch is reinstalled on every run (macOS 26 platform tag mismatch)
 echo "Starting HTTP service..."
-uv run python -m deep_agent_service.main_http &
+UV_NO_SYNC=1 uv run python -m deep_agent_service.main_http &
 HTTP_PID=$!
 
-# Wait for HTTP service to be ready
+# Wait for HTTP service to be ready (model loading can take 30+ seconds)
 echo "Waiting for HTTP service..."
-for i in {1..15}; do
+for i in {1..45}; do
     if curl -s "http://localhost:${HTTP_PORT}/health" > /dev/null 2>&1; then
         echo "HTTP service is ready."
         break
     fi
-    if [ $i -eq 15 ]; then
+    if [ $i -eq 45 ]; then
         echo "WARNING: HTTP service health check timed out (may still be starting)"
     fi
     sleep 1
@@ -81,7 +85,7 @@ done
 
 # Start the Gradio demo UI
 echo "Starting Gradio UI..."
-uv run python demo/app.py &
+UV_NO_SYNC=1 uv run --group demo python demo/app.py &
 DEMO_PID=$!
 
 echo ""

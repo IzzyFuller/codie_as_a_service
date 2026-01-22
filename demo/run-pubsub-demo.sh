@@ -64,9 +64,13 @@ echo "  Press Ctrl+C to stop demo (infrastructure stays running)"
 echo "==========================================="
 echo ""
 
+# Ensure demo dependencies are installed
+uv sync --group demo --quiet
+
 # Start the agent service in background
+# UV_NO_SYNC=1 prevents uv bug where torch is reinstalled on every run (macOS 26 platform tag mismatch)
 echo "Starting Pub/Sub agent service..."
-uv run python -m deep_agent_service.main_pubsub &
+UV_NO_SYNC=1 uv run python -m deep_agent_service.main_pubsub &
 AGENT_PID=$!
 
 # Give agent time to start
@@ -76,4 +80,4 @@ echo "Agent service running (PID: $AGENT_PID)"
 echo ""
 
 # Run CLI client in foreground
-uv run python demo/pubsub_cli.py
+UV_NO_SYNC=1 uv run python demo/pubsub_cli.py

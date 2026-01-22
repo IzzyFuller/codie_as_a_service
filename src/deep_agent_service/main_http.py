@@ -78,6 +78,11 @@ def create_app(
             # Emit error event
             yield f"event: error\ndata: {json.dumps({'message': str(e)})}\n\n"
 
+    @app.get("/health")
+    async def health() -> dict[str, str]:
+        """Health check endpoint."""
+        return {"status": "ok"}
+
     @app.post("/chat")
     async def chat(request: ChatRequest) -> StreamingResponse:
         """

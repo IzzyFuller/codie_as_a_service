@@ -65,19 +65,23 @@ class LocalLLMAdapter:
         # Convert tools to SmolLM3 format
         smol_tools = self._convert_tools(tools) if tools else None
 
-        # Apply chat template with tools
-        inputs = self._tokenizer.apply_chat_template(
+        # Apply chat template with tools - get both input_ids and attention_mask
+        tokenized = self._tokenizer.apply_chat_template(
             chat_messages,
             xml_tools=smol_tools,
             enable_thinking=False,
             add_generation_prompt=True,
             tokenize=True,
             return_tensors="pt",
-        ).to(self._device)
+            return_dict=True,
+        )
+        input_ids = tokenized["input_ids"].to(self._device)
+        attention_mask = tokenized["attention_mask"].to(self._device)
 
-        # Generate
+        # Generate with explicit attention mask
         outputs = self._model.generate(
-            inputs,
+            input_ids,
+            attention_mask=attention_mask,
             max_new_tokens=4096,
             temperature=0.6,
             top_p=0.95,
@@ -85,7 +89,7 @@ class LocalLLMAdapter:
         )
 
         # Decode only the new tokens (not the input)
-        new_tokens = outputs[0][inputs.shape[-1]:]
+        new_tokens = outputs[0][input_ids.shape[-1]:]
         text = self._tokenizer.decode(new_tokens, skip_special_tokens=True)
 
         return self._parse_response(text, output_format)

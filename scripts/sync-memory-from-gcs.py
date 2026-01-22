@@ -1,17 +1,22 @@
 #!/usr/bin/env python3
-"""Sync session notes from GCS emulator back to Codie's local memory.
+"""Sync session notes from GCS emulator back to local memory.
 
 This script fetches session notes from the GCS emulator (Docker) and
-identifies new entries that can be merged into Codie's real memory.
+identifies new entries that can be merged into local memory.
 
 Usage:
     python scripts/sync-memory-from-gcs.py [user_id]
 
     # Show new notes from GCS that aren't in local memory
-    python scripts/sync-memory-from-gcs.py izzy
+    python scripts/sync-memory-from-gcs.py demo-user
 
     # Output as JSON for programmatic use
-    python scripts/sync-memory-from-gcs.py izzy --json
+    python scripts/sync-memory-from-gcs.py demo-user --json
+
+Environment variables:
+    CODIE_MEMORY_PATH: Path to local memory directory (required)
+    STORAGE_EMULATOR_HOST: GCS emulator URL (default: http://localhost:4443)
+    GCS_BUCKET_NAME: GCS bucket name (default: deep-agent-memory)
 """
 
 import argparse
@@ -26,7 +31,11 @@ import httpx
 # Configuration
 GCS_EMULATOR_URL = os.environ.get("STORAGE_EMULATOR_HOST", "http://localhost:4443")
 GCS_BUCKET_NAME = os.environ.get("GCS_BUCKET_NAME", "deep-agent-memory")
-CODIE_MEMORY_DIR = Path("/home/izzy_fo/Codie/memory")
+CODIE_MEMORY_PATH = os.environ.get("CODIE_MEMORY_PATH")
+if not CODIE_MEMORY_PATH:
+    print("ERROR: CODIE_MEMORY_PATH environment variable is required", file=sys.stderr)
+    sys.exit(1)
+CODIE_MEMORY_DIR = Path(CODIE_MEMORY_PATH)
 
 
 def fetch_gcs_session(user_id: str) -> str | None:
@@ -90,7 +99,7 @@ def find_new_notes(gcs_notes: list[dict], local_notes: list[dict]) -> list[dict]
 def main():
     parser = argparse.ArgumentParser(description="Sync session notes from GCS to local")
     parser.add_argument(
-        "user_id", nargs="?", default="izzy", help="GCS user ID (default: izzy)"
+        "user_id", nargs="?", default="demo-user", help="GCS user ID (default: demo-user)"
     )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     args = parser.parse_args()

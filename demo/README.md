@@ -1,16 +1,17 @@
-# Deep Agent Demo
+# Codie-as-a-Service Demo
 
-Two demo options for the deep agent service:
+Two demo options:
 1. **HTTP Streaming** - Gradio chat UI with SSE streaming responses
-2. **Pub/Sub Message-Driven** - CLI client with async message processing
+2. **Pub/Sub Message-Driven** - CLI client with async message processing via RabbitMQ
 
 Both demonstrate per-user memory persistence.
 
 ## Prerequisites
 
 - Docker installed and running
-- Main dependencies installed: `uv sync --no-dev` (from repo root)
-- `.env` file configured (see below)
+- Main dependencies installed: `uv sync` (from repo root)
+- `.env` file configured (copy from `.env.example`)
+- Local LLM model downloaded (e.g., SmolLM3-3B via HuggingFace)
 
 ## Option 1: HTTP Streaming Demo (Gradio UI)
 
@@ -23,8 +24,9 @@ set -a && source .env && set +a && ./demo/run-http-demo.sh
 This single command:
 1. Starts GCS emulator (Docker container)
 2. Creates the memory bucket
-3. Starts the HTTP service (port 8080)
-4. Starts the Gradio demo UI (port 7860)
+3. Loads the local LLM model
+4. Starts the HTTP service (port 8080)
+5. Starts the Gradio demo UI (port 7860)
 
 Then open http://localhost:7860
 
@@ -40,10 +42,10 @@ set -a && source .env && set +a && ./demo/run-pubsub-demo.sh
 
 This single command:
 1. Starts GCS emulator (Docker container)
-2. Starts Pub/Sub emulator (Docker container)
-3. Creates topics and subscriptions
+2. Starts RabbitMQ (Docker container)
+3. Creates queues and exchanges
 4. Creates demo user
-5. Starts the Pub/Sub agent service
+5. Starts the RabbitMQ agent service
 6. Launches CLI client
 
 Type messages at the `You:` prompt. Use `/quit` to exit.
@@ -52,20 +54,18 @@ Press `Ctrl+C` to stop all services.
 
 ## Environment Variables
 
-Create a `.env` file in the repo root with:
+Create a `.env` file in the repo root (see `.env.example`):
 
 ```bash
-# Required - LLM API
-OPENROUTER_API_KEY=your-openrouter-key
-OPENROUTER_MODEL=anthropic/claude-sonnet-4-20250514
+# Required - Local LLM
+MODEL_NAME=HuggingFaceTB/SmolLM3-3B
+DEVICE=mps  # mps (Apple Silicon), cuda, or cpu
 
-# Required - Langfuse (prompt management)
-LANGFUSE_PUBLIC_KEY=your-public-key
-LANGFUSE_SECRET_KEY=your-secret-key
-LANGFUSE_HOST=https://cloud.langfuse.com
-LANGFUSE_PROMPT_LABEL=codie_as_a_service
+# Required - Authentication
+API_KEY=your-secret-api-key
 
 # Required - Prompt configuration
+PROMPTS_DIR=./prompts
 PROMPT_NAMES=codie_as_a_service_system
 
 # Optional - Override defaults
@@ -74,30 +74,12 @@ HTTP_PORT=8080
 GCS_BUCKET_NAME=deep-agent-memory
 ```
 
-## Manual Startup (Alternative)
-
-If you prefer to run services separately:
-
-**Terminal 1** - Start GCS emulator and HTTP service:
-```bash
-./scripts/start-local.sh
-```
-
-**Terminal 2** - Start demo UI (preferred):
-```bash
-set -a && source .env && set +a && ./demo/run-http-demo.sh
-```
-
-Or for Pub/Sub CLI demo:
-```bash
-set -a && source .env && set +a && ./demo/run-pubsub-demo.sh
-```
-
 ## Demo Features
 
 - **Streaming responses**: Watch the agent think in real-time
 - **Per-user memory**: Each user_id gets isolated memory storage
 - **Session persistence**: Memory persists across conversations for the same user
+- **API key authentication**: HTTP endpoint protected by X-API-Key header
 
 ## Testing Memory Persistence
 
@@ -118,10 +100,13 @@ Start Docker and try again.
 ```
 ModuleNotFoundError: No module named 'gradio'
 ```
-Run `uv sync --no-dev` from repo root.
+Run `uv sync --group demo` from repo root.
 
 **Port already in use:**
-Check for existing processes on ports 4443, 8080, or 7860.
+Check for existing processes on ports 4443, 5672, 8080, or 7860.
+
+**Model loading slow:**
+First run downloads the model from HuggingFace. Subsequent runs use cached model.
 
 ## Architecture
 
@@ -132,11 +117,11 @@ User Browser (localhost:7860)
        │
        ▼
    Gradio UI (demo/app.py)
-       │ HTTP POST /chat
+       │ HTTP POST /chat (X-API-Key header)
        ▼
    HTTP Service (main_http.py:8080)
        │
-       ├──▶ Anthropic API (via OpenRouter)
+       ├──▶ Local LLM (Transformers)
        │
        └──▶ GCS Emulator (localhost:4443)
             └── users/{user_id}/*.md
@@ -149,19 +134,16 @@ User Browser (localhost:7860)
        │
        │ publish request
        ▼
-   Pub/Sub Emulator (localhost:8085)
+   RabbitMQ (localhost:5672)
    ┌───────────────────────────────┐
-   │  agent-requests (topic)       │
-   │       │                       │
-   │       ▼                       │
-   │  agent-requests-sub           │
+   │  agent.requests (queue)       │
    └───────────────────────────────┘
        │
-       │ subscribe
+       │ consume
        ▼
    Agent Service (main_pubsub.py)
        │
-       ├──▶ Anthropic API (via OpenRouter)
+       ├──▶ Local LLM (Transformers)
        │
        ├──▶ GCS Emulator (localhost:4443)
        │         └── users/{user_id}/*.md
@@ -169,13 +151,10 @@ User Browser (localhost:7860)
        │ publish response
        ▼
    ┌───────────────────────────────┐
-   │  agent-responses (topic)      │
-   │       │                       │
-   │       ▼                       │
-   │  agent-responses-sub          │
+   │  agent.responses (exchange)   │
    └───────────────────────────────┘
        │
-       │ poll for response
+       │ consume response
        ▼
    CLI Client (pubsub_cli.py)
 ```

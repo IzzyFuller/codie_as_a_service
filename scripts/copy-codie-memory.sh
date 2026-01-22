@@ -1,15 +1,21 @@
 #!/bin/bash
-# Copy Codie's memory entities into GCS emulator for a specified user
+# Copy memory entities into GCS emulator for a specified user
 #
 # Usage:
 #   ./scripts/copy-codie-memory.sh [user_id]
 #
-# Default user_id: izzy
+# Environment variables:
+#   CODIE_MEMORY_PATH: Path to local memory directory (required)
 
 set -e
 
-USER_ID="${1:-izzy}"
-CODIE_MEMORY_DIR="${CODIE_MEMORY_PATH:-/Users/izzyfuller/Codie/memory}"
+USER_ID="${1:-demo-user}"
+
+if [ -z "$CODIE_MEMORY_PATH" ]; then
+    echo "ERROR: CODIE_MEMORY_PATH environment variable is required"
+    exit 1
+fi
+CODIE_MEMORY_DIR="$CODIE_MEMORY_PATH"
 
 # Configuration
 GCS_EMULATOR_PORT=${GCS_EMULATOR_PORT:-4443}

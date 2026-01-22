@@ -9,7 +9,7 @@ Microservice for per-user agent identity and memory - a prototype for "Codie-as-
 
 ## Overview
 
-This service extracts deep agent functionality from python-monorepo and preprocessing-service into a standalone microservice that enables per-user agent identity and memory isolation. Each user gets their own memory space (similar to how Codie maintains memory for Izzy), positioning us to provide personalized AI agents at scale.
+A standalone microservice that enables per-user agent identity and memory isolation. Each user gets their own memory space, enabling personalized AI agents at scale.
 
 ## Architecture
 
@@ -24,36 +24,37 @@ codie_as_a_service/
 │   │   ├── memory/           # User memory management
 │   │   └── tools/            # Agent tool system
 │   ├── adapters/             # Infrastructure layer
-│   │   ├── llm/              # Anthropic SDK adapter
-│   │   ├── prompts/          # Langfuse integration
-│   │   ├── storage/          # GCS & Firestore adapters
-│   │   └── messaging/        # Pub/Sub message handling
+│   │   ├── auth/             # Authentication adapters
+│   │   ├── llm/              # Local LLM adapter (Transformers)
+│   │   ├── prompts/          # File-based prompt templates
+│   │   ├── storage/          # GCS adapter
+│   │   └── messaging/        # RabbitMQ adapter
 │   └── api/                  # Entry points
 └── tests/                    # Mirror structure for tests
 ```
 
 ### Design Principles
 
-- **Proportional Response**: Simple POC approach (~500-800 LOC) vs complex production system (3,405 LOC)
-- **Archaeological Engineering**: Reuses proven patterns from preprocessing-service
-- **TDD**: 100% test coverage target with mock-at-boundaries strategy
-- **Message-Driven**: Pub/Sub for async execution (no threading complexity)
+- **Hexagonal Architecture**: Ports & adapters pattern for easy swapping of infrastructure
+- **TDD**: 100% test coverage with mock-at-boundaries strategy
+- **Message-Driven**: RabbitMQ for async execution (no threading complexity)
 
 ## Technology Stack
 
 ### Core Dependencies
 - **Python**: 3.13.x
-- **Anthropic SDK**: Direct LLM integration (no LangChain/LangGraph overhead)
-- **Langfuse**: Version-controlled prompts
-- **Google Cloud**: Storage (GCS) for user memory files, Firestore for session metadata
+- **Transformers**: Native HuggingFace model loading (supports local models like SmolLM3)
+- **FastAPI**: HTTP API with streaming SSE responses
+- **Google Cloud Storage**: User memory file storage
 - **Pydantic**: Type-safe models throughout
-- **synapse**: Stack-agnostic pub/sub library
+- **pika**: RabbitMQ client for pub/sub messaging
+- **synapse**: Stack-agnostic pub/sub protocols
 
 ### Dev Dependencies
 - **pytest**: Testing framework with coverage and async support
 - **ruff**: Fast linting and formatting
 - **mypy**: Static type checking
-- **httpx**: HTTP client for test mocking
+- **Docker**: GCS emulator and RabbitMQ for integration tests
 
 ## POC Feature Scope
 
@@ -66,7 +67,7 @@ codie_as_a_service/
    - Simple key-value memory operations (read/write)
 3. **Simple ReAct Agent**:
    - Reason → Act → Observe loop (max 10 iterations)
-   - Direct Anthropic SDK integration
+   - Native Transformers integration (local models)
    - Structured outputs via Pydantic
 4. **Session Management**: Create, resume, and end user sessions
 5. **Tool System**: 3 tools (read_memory, write_memory, + 1 domain tool)
@@ -88,8 +89,7 @@ codie_as_a_service/
 
 - **Python 3.13.x** - Required (strict version constraint)
 - **uv** - Package manager ([install guide](https://docs.astral.sh/uv/getting-started/installation/))
-- **Docker** - For running GCS and Pub/Sub emulators
-- API keys: Anthropic, Langfuse
+- **Docker** - For running GCS emulator and RabbitMQ
 
 ### Installation
 
@@ -101,22 +101,20 @@ cd codie_as_a_service
 # Install all dependencies (main + dev + demo)
 uv sync
 
-# Set required environment variables
-export ANTHROPIC_API_KEY="your-key"
-export LANGFUSE_PUBLIC_KEY="your-public-key"
-export LANGFUSE_SECRET_KEY="your-secret-key"
+# Copy and configure environment
+cp .env.example .env
+# Edit .env with your settings
 ```
 
 ### Configuration
 
-Set environment variables:
+See `.env.example` for all available options. Key settings:
 
 ```bash
-export ANTHROPIC_API_KEY="your-key"
-export LANGFUSE_PUBLIC_KEY="your-public-key"
-export LANGFUSE_SECRET_KEY="your-secret-key"
-export GCP_PROJECT_ID="your-project"
-export MEMORY_BUCKET="gs://your-memory-bucket"
+# Required
+API_KEY=your-secret-api-key        # For HTTP endpoint authentication
+MODEL_NAME=HuggingFaceTB/SmolLM3-3B  # Or any HuggingFace model
+DEVICE=mps                          # mps (Apple Silicon), cuda, or cpu
 ```
 
 ## Running the Demo
@@ -164,9 +162,12 @@ The service exposes a streaming chat endpoint using Server-Sent Events (SSE):
 ```bash
 curl -X POST http://localhost:8080/chat \
   -H "Content-Type: application/json" \
+  -H "X-API-Key: your-api-key" \
   -d '{"user_id": "demo-user", "session_id": "test", "message": "Hello!"}' \
   --no-buffer
 ```
+
+Note: The `/chat` endpoint requires authentication via `X-API-Key` header. The `/health` endpoint is open.
 
 ### Gradio UI
 
@@ -180,11 +181,14 @@ The demo includes a web interface for interactive testing:
 For advanced users testing with custom memory:
 
 ```bash
-# Copy Codie's memory entities to a GCS user
-./scripts/copy-codie-memory.sh izzy
+# Set path to your local memory directory
+export CODIE_MEMORY_PATH=/path/to/your/memory
+
+# Copy memory entities to a GCS user
+./scripts/copy-codie-memory.sh demo-user
 
 # Sync session notes back from GCS to local
-python scripts/sync-memory-from-gcs.py izzy
+python scripts/sync-memory-from-gcs.py demo-user
 ```
 
 ## Testing
@@ -204,10 +208,10 @@ uv run pytest -v
 
 ### Test Strategy
 
-- **Mock at boundaries**: GCS, Firestore, Anthropic API, Langfuse
+- **Mock at boundaries**: GCS, LLM model, RabbitMQ
 - **Don't mock our logic**: ReAct loop, memory service, tool registry
-- **Emulators**: Docker-based Pub/Sub and GCS emulators for integration tests
-- **Fixtures**: Reusable test data in `tests/conftest.py`
+- **Emulators**: Docker-based GCS and RabbitMQ for integration tests
+- **TestApp abstraction**: Adapter-agnostic test interface
 
 ### Code Quality
 
@@ -246,15 +250,14 @@ gs://deep-agent-memory-{env}/
 
 ## Project Status
 
-**Current Phase**: Initial setup and architecture definition
+**Current Phase**: Core functionality complete
 
-**Next Steps**:
-1. Define core Pydantic models (AgentState, Message, MemoryEntry)
-2. Implement protocol interfaces
-3. Build adapters with mocked tests
-4. Implement services layer
-5. Create integration tests
-6. Validate with real Anthropic API
+**Implemented**:
+- Hexagonal architecture with swappable adapters
+- ReAct agent with tool calling (read/write memory)
+- HTTP streaming API with API key authentication
+- RabbitMQ pub/sub messaging
+- 21 tests with 100% coverage
 
 ## Contributing
 

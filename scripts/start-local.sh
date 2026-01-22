@@ -3,7 +3,7 @@
 #
 # Prerequisites:
 #   - Docker installed and running
-#   - .env file with ANTHROPIC_API_KEY and Langfuse credentials
+#   - .env file configured (see .env.example)
 #
 # Usage:
 #   ./scripts/start-local.sh

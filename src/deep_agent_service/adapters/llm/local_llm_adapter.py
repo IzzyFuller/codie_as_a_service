@@ -92,7 +92,7 @@ class LocalLLMAdapter:
         new_tokens = outputs[0][input_ids.shape[-1] :]
         text = self._tokenizer.decode(new_tokens, skip_special_tokens=True)
 
-        return self._parse_response(text, output_format)
+        return self._parse_response(text)
 
     def _prepare_messages(
         self, messages: list[Message], system_prompt: str
@@ -114,9 +114,7 @@ class LocalLLMAdapter:
             for tool in tools
         ]
 
-    def _parse_response(
-        self, text: str, output_format: dict[str, Any] | None
-    ) -> LLMResponse:
+    def _parse_response(self, text: str) -> LLMResponse:
         """
         Parse model output into LLMResponse.
 
@@ -139,10 +137,7 @@ class LocalLLMAdapter:
 
         # Add text content if any remains
         if remaining_text.strip():
-            text_content = remaining_text.strip()
-            if output_format:
-                text_content = self._normalize_to_json(text_content)
-            content_blocks.append(ContentBlock(text=text_content))
+            content_blocks.append(ContentBlock(text=remaining_text.strip()))
 
         # Determine stop reason
         stop_reason = "tool_use" if tool_calls else "end_turn"
@@ -175,34 +170,3 @@ class LocalLLMAdapter:
 
         return tool_calls, remaining_text
 
-    def _normalize_to_json(self, text: str) -> str:
-        """
-        Normalize text response to valid JSON string.
-
-        Handles:
-        1. Already valid JSON -> return as-is
-        2. JSON in markdown code blocks -> extract it
-        3. Plain text -> wrap in {"response": "..."}
-        """
-        text = text.strip()
-
-        # Try 1: Already valid JSON
-        try:
-            json.loads(text)
-            return text
-        except json.JSONDecodeError:
-            pass
-
-        # Try 2: Extract JSON from markdown code blocks
-        if "```" in text:
-            match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
-            if match:
-                extracted = match.group(1)
-                try:
-                    json.loads(extracted)
-                    return extracted
-                except json.JSONDecodeError:
-                    pass
-
-        # Fallback: Wrap raw text in standard response format
-        return json.dumps({"response": text})

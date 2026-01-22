@@ -70,14 +70,14 @@ echo "Starting HTTP service..."
 UV_NO_SYNC=1 uv run python -m deep_agent_service.main_http &
 HTTP_PID=$!
 
-# Wait for HTTP service to be ready (model loading can take 30+ seconds)
+# Wait for HTTP service to be ready (model loading + app init can take 2+ minutes)
 echo "Waiting for HTTP service..."
-for i in {1..45}; do
+for i in {1..180}; do
     if curl -s "http://localhost:${HTTP_PORT}/health" > /dev/null 2>&1; then
         echo "HTTP service is ready."
         break
     fi
-    if [ $i -eq 45 ]; then
+    if [ $i -eq 180 ]; then
         echo "WARNING: HTTP service health check timed out (may still be starting)"
     fi
     sleep 1

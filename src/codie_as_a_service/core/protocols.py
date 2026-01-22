@@ -90,3 +90,20 @@ class PromptProtocol(Protocol):
             Compiled prompt string
         """
         ...
+
+
+@runtime_checkable
+class AuthProtocol(Protocol):
+    """Abstract interface for authentication."""
+
+    def verify(self, credentials: str) -> bool:
+        """
+        Verify credentials.
+
+        Args:
+            credentials: The credentials to verify (e.g., API key)
+
+        Returns:
+            True if valid, False otherwise
+        """
+        ...

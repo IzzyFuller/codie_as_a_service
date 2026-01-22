@@ -5,15 +5,16 @@ import os
 from typing import Any, Generator
 
 import uvicorn
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from google.cloud import storage
 from pydantic import BaseModel
 
+from codie_as_a_service.adapters.auth.api_key_adapter import APIKeyAuthAdapter
 from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
 from codie_as_a_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
-from codie_as_a_service.core.protocols import LLMProtocol, PromptProtocol
+from codie_as_a_service.core.protocols import AuthProtocol, LLMProtocol, PromptProtocol
 from codie_as_a_service.services.agent.react_agent import ReActAgent
 from codie_as_a_service.services.memory.memory_service import MemoryService
 
@@ -32,6 +33,7 @@ def create_app(
     llm_adapter: LLMProtocol,
     prompt_adapter: PromptProtocol,
     prompt_names: list[str],
+    auth: AuthProtocol,
 ) -> FastAPI:
     """
     Create FastAPI app with chat endpoint.
@@ -41,6 +43,7 @@ def create_app(
         llm_adapter: OpenAI-compatible LLM adapter
         prompt_adapter: File-based prompt adapter
         prompt_names: List of prompt names to fetch and combine for system prompt
+        auth: Authentication adapter for verifying requests
 
     Returns:
         Configured FastAPI application
@@ -54,6 +57,11 @@ def create_app(
         memory=memory_service,
         prompt_names=prompt_names,
     )
+
+    def verify_api_key(x_api_key: str | None = Header(None)) -> None:
+        """FastAPI dependency to verify API key."""
+        if x_api_key is None or not auth.verify(x_api_key):
+            raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
     def generate_sse_events(
         user_id: str,
@@ -83,7 +91,7 @@ def create_app(
         """Health check endpoint."""
         return {"status": "ok"}
 
-    @app.post("/chat")
+    @app.post("/chat", dependencies=[Depends(verify_api_key)])
     async def chat(request: ChatRequest) -> StreamingResponse:
         """
         Process chat message and return streaming response.
@@ -137,6 +145,10 @@ def main() -> None:
         raise ValueError("PROMPT_NAMES environment variable is required")
     prompt_names = [name.strip() for name in prompt_names_str.split(",")]
 
+    api_key = os.environ.get("API_KEY")
+    if not api_key:
+        raise ValueError("API_KEY environment variable is required")
+
     # Initialize clients
     gcs_client = storage.Client()
     bucket = gcs_client.bucket(gcs_bucket_name)
@@ -148,12 +160,16 @@ def main() -> None:
     # Build memory service
     memory_service = MemoryService(storage=GCSMemoryAdapter(bucket=bucket))
 
+    # Initialize auth adapter
+    auth_adapter = APIKeyAuthAdapter(valid_key=api_key)
+
     # Create and run app
     app = create_app(
         memory_service=memory_service,
         llm_adapter=llm_adapter,
         prompt_adapter=prompt_adapter,
         prompt_names=prompt_names,
+        auth=auth_adapter,
     )
 
     uvicorn.run(app, host=host, port=port)

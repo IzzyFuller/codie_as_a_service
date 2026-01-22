@@ -66,6 +66,8 @@ GCS_EMULATOR_PORT = 4443
 REQUEST_SUBSCRIPTION = "agent.requests"
 RESPONSE_SUBSCRIPTION = "agent.responses"
 RESPONSE_TOPIC = "agent.responses"
+# Test API key for auth
+TEST_API_KEY = "test-secret-key-12345"
 
 
 # ============================================================================
@@ -473,6 +475,7 @@ def http_app(
     memory_service,
     llm_adapter,
     file_prompt_adapter,
+    api_key_auth_adapter,
 ):
     """Create FastAPI HTTP app for E2E tests."""
     app = create_http_app(
@@ -480,15 +483,46 @@ def http_app(
         llm_adapter=llm_adapter,
         prompt_adapter=file_prompt_adapter,
         prompt_names=["codie_as_a_service_system"],
+        auth=api_key_auth_adapter,
     )
     return app
+
+
+@pytest.fixture(scope="session")
+def api_key_auth_adapter():
+    """Create API key auth adapter for tests."""
+    from codie_as_a_service.adapters.auth.api_key_adapter import APIKeyAuthAdapter
+
+    return APIKeyAuthAdapter(valid_key=TEST_API_KEY)
 
 
 class HTTPTestClient:
     """Client for HTTP E2E tests - simulates external client interacting with the system."""
 
-    def __init__(self, app):
+    def __init__(self, app, api_key: str):
         self._client = StarletteTestClient(app)
+        self._api_key = api_key
+
+    def health(self):
+        """GET /health endpoint (no auth required)."""
+        return self._client.get("/health")
+
+    def chat_raw(
+        self,
+        user_id: str,
+        session_id: str,
+        message: str,
+        api_key: str | None,
+        output_format: dict | None = None,
+    ):
+        """POST to /chat and return raw response (for testing auth)."""
+        payload = {"user_id": user_id, "session_id": session_id, "message": message}
+        if output_format:
+            payload["output_format"] = output_format
+        headers = {}
+        if api_key is not None:
+            headers["X-API-Key"] = api_key
+        return self._client.post("/chat", json=payload, headers=headers)
 
     def chat(
         self,
@@ -497,11 +531,10 @@ class HTTPTestClient:
         message: str,
         output_format: dict | None = None,
     ) -> list[dict]:
-        """POST to /chat and collect SSE events."""
-        payload = {"user_id": user_id, "session_id": session_id, "message": message}
-        if output_format:
-            payload["output_format"] = output_format
-        response = self._client.post("/chat", json=payload)
+        """POST to /chat and collect SSE events (uses configured API key)."""
+        response = self.chat_raw(
+            user_id, session_id, message, self._api_key, output_format
+        )
 
         # Parse SSE response
         events = []
@@ -616,6 +649,23 @@ class TestApp:
         """
         return self._http_client.chat(user_id, session_id, message, output_format)
 
+    def chat_raw(
+        self,
+        user_id: str,
+        session_id: str,
+        message: str,
+        api_key: str | None,
+        output_format: dict | None = None,
+    ):
+        """Make a chat request and return raw response (for auth testing)."""
+        return self._http_client.chat_raw(
+            user_id, session_id, message, api_key, output_format
+        )
+
+    def health(self):
+        """GET /health endpoint."""
+        return self._http_client.health()
+
     def read_memory(self, user_id: str, key: str) -> str | None:
         """Read user memory (for verifying side effects)."""
         return self._memory_service.read_memory(user_id=user_id, key=key)
@@ -678,7 +728,7 @@ def test_app(memory_service, llm_adapter, http_app) -> TestApp:
     This is the PRIMARY fixture HTTP tests should use. It hides all
     implementation details about adapters and wiring.
     """
-    http_client = HTTPTestClient(http_app)
+    http_client = HTTPTestClient(http_app, api_key=TEST_API_KEY)
     return TestApp(
         memory_service=memory_service,
         llm_adapter=llm_adapter,

@@ -116,13 +116,11 @@ def main() -> None:
     if not response_topic_path:
         raise ValueError("PUBSUB_RESPONSE_TOPIC environment variable is required")
 
-    local_llm_url = os.environ.get("LOCAL_LLM_URL")
-    if not local_llm_url:
-        raise ValueError("LOCAL_LLM_URL environment variable is required")
+    model_name = os.environ.get("MODEL_NAME")
+    if not model_name:
+        raise ValueError("MODEL_NAME environment variable is required")
 
-    local_model_name = os.environ.get("LOCAL_MODEL_NAME")
-    if not local_model_name:
-        raise ValueError("LOCAL_MODEL_NAME environment variable is required")
+    device = os.environ.get("DEVICE", "mps")  # Default to Apple Silicon
 
     prompts_dir = os.environ.get("PROMPTS_DIR")
     if not prompts_dir:
@@ -142,7 +140,7 @@ def main() -> None:
     subscriber = pubsub_v1.SubscriberClient()
 
     # Initialize adapters
-    llm_adapter = LocalLLMAdapter(base_url=local_llm_url, model=local_model_name)
+    llm_adapter = LocalLLMAdapter(model_name=model_name, device=device)
     prompt_adapter = FilePromptAdapter(prompts_dir=prompts_dir)
 
     # Build memory service

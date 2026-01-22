@@ -8,15 +8,10 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
-from openai.types.chat import ChatCompletion, ChatCompletionMessage
-from openai.types.chat.chat_completion import Choice
-from openai.types.chat.chat_completion_message_tool_call import (
-    ChatCompletionMessageToolCall,
-    Function,
-)
+import torch
 from google.cloud import firestore, storage
 from google.cloud import pubsub_v1
 
@@ -245,7 +240,7 @@ def memory_service(gcs_bucket):
 @pytest.fixture(scope="session")
 def agent_app(
     memory_service,
-    openai_client,
+    llm_adapter,
     file_prompt_adapter,
     pubsub_publisher,
     pubsub_subscriber,
@@ -255,7 +250,7 @@ def agent_app(
     # GCP SubscriberClient directly implements PubSubSubscriber protocol (duck typing)
     app = create_app(
         memory_service=memory_service,
-        llm_adapter=openai_client,
+        llm_adapter=llm_adapter,
         prompt_adapter=file_prompt_adapter,
         prompt_names=["deep_agent_service_system"],
         publisher=pubsub_publisher,
@@ -341,97 +336,42 @@ def test_client(pubsub_infrastructure):
 
 
 # ============================================================================
-# OpenAI SDK Fixtures (Internal - Used by TestApp)
+# LLM Adapter Fixtures (Internal - Used by TestApp)
 # ============================================================================
-
-# Message counter for unique IDs
-_message_counter = 0
-
-
-def _create_openai_response(
-    stop_reason: str,
-    content: str | None = None,
-    tool_calls: list[dict] | None = None,
-) -> ChatCompletion:
-    """Factory for creating real OpenAI ChatCompletion response objects.
-
-    Use this in tests to build LLM responses. Tests configure
-    openai_client.chat.completions.create.side_effect with a list of these.
-
-    Args:
-        stop_reason: "stop" or "tool_calls"
-        content: Text response content
-        tool_calls: List of tool call objects (OpenAI format)
-
-    Example:
-        response = _create_openai_response(
-            stop_reason="stop",
-            content="Hello!"
-        )
-        openai_client.chat.completions.create.return_value = response
-    """
-    global _message_counter
-    _message_counter += 1
-
-    # Build the message content
-    message_data = {
-        "role": "assistant",
-        "content": content,
-    }
-    if tool_calls:
-        message_data["tool_calls"] = tool_calls
-
-    message = ChatCompletionMessage(**message_data)
-
-    # Map domain stop_reason to OpenAI finish_reason
-    finish_reason_mapping = {
-        "end_turn": "stop",
-        "tool_use": "tool_calls",
-        "max_tokens": "length",
-    }
-    finish_reason = finish_reason_mapping.get(stop_reason, "stop")
-
-    choice = Choice(
-        index=0,
-        message=message,
-        finish_reason=finish_reason,
-        logprobs=None,
-    )
-
-    return ChatCompletion(
-        id=f"chatcmpl_test_{_message_counter}",
-        object="chat.completion",
-        created=int(time.time()),
-        model="gpt-4",
-        choices=[choice],
-        usage={
-            "prompt_tokens": 100,
-            "completion_tokens": 50,
-            "total_tokens": 150,
-        },
-    )
 
 
 @pytest.fixture(scope="session")
-def openai_client():
-    """Real OpenAI adapter with only chat.completions.create mocked.
+def llm_adapter():
+    """LocalLLMAdapter with mocked model and tokenizer.
 
     Used internally by TestApp. Tests should not use this fixture directly -
     use test_app.stub_llm_responses() instead.
     """
     from deep_agent_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 
-    # Create real adapter (base_url doesn't matter since we mock the network call)
-    adapter = LocalLLMAdapter(base_url="http://localhost:8080/v1", model="test-model")
+    # Create mock tokenizer and model
+    mock_tokenizer = MagicMock()
+    mock_model = MagicMock()
 
-    # Only mock the method that would hit the network
-    adapter._client.chat.completions.create = MagicMock()
+    # Configure tokenizer
+    mock_tokenizer.apply_chat_template.return_value = torch.tensor([[1, 2, 3]])
+    mock_tokenizer.eos_token_id = 0
+    mock_tokenizer.decode.return_value = "I'm ready to help you."
 
-    # Default response for tests that don't configure their own
-    adapter._client.chat.completions.create.return_value = _create_openai_response(
-        stop_reason="end_turn",
-        content="I'm ready to help you.",
-    )
+    # Configure model
+    mock_model.generate.return_value = torch.tensor([[1, 2, 3, 4, 5, 6]])
+    mock_model.to.return_value = mock_model
+
+    # Create adapter without loading real model
+    with patch(
+        "deep_agent_service.adapters.llm.local_llm_adapter.AutoTokenizer"
+    ) as mock_auto_tok, patch(
+        "deep_agent_service.adapters.llm.local_llm_adapter.AutoModelForCausalLM"
+    ) as mock_auto_model:
+        mock_auto_tok.from_pretrained.return_value = mock_tokenizer
+        mock_auto_model.from_pretrained.return_value = mock_model
+
+        adapter = LocalLLMAdapter(model_name="test-model", device="cpu")
 
     return adapter
 
@@ -507,13 +447,13 @@ def sample_memory_content() -> str:
 @pytest.fixture(scope="session")
 def http_app(
     memory_service,
-    openai_client,
+    llm_adapter,
     file_prompt_adapter,
 ):
     """Create FastAPI HTTP app for E2E tests."""
     app = create_http_app(
         memory_service=memory_service,
-        llm_adapter=openai_client,
+        llm_adapter=llm_adapter,
         prompt_adapter=file_prompt_adapter,
         prompt_names=["deep_agent_service_system"],
     )
@@ -567,7 +507,6 @@ class TestApp:
     only this class needs to change - not the tests.
     """
 
-    # Counter for generating unique OpenAI response IDs
     _response_counter = 0
 
     def __init__(
@@ -621,19 +560,15 @@ class TestApp:
 
         Args:
             responses: Domain-level response specs. Converted internally
-                      to adapter-specific format.
+                      to text that the adapter will parse.
         """
         adapter_responses = [self._to_adapter_response(r) for r in responses]
-        self._llm_adapter._client.chat.completions.create.side_effect = (
-            adapter_responses
-        )
+        self._llm_adapter._tokenizer.decode.side_effect = adapter_responses
 
     def reset_llm(self) -> None:
         """Reset LLM mock to default state."""
-        self._llm_adapter._client.chat.completions.create.side_effect = None
-        self._llm_adapter._client.chat.completions.create.return_value = (
-            self._default_response
-        )
+        self._llm_adapter._tokenizer.decode.side_effect = None
+        self._llm_adapter._tokenizer.decode.return_value = self._default_response
 
     def chat(
         self,
@@ -691,67 +626,27 @@ class TestApp:
             user_id, session_id, message, output_format, timeout_seconds
         )
 
-    def _to_adapter_response(self, spec: LLMResponseSpec) -> ChatCompletion:
+    def _to_adapter_response(self, spec: LLMResponseSpec) -> str:
         """
-        Convert domain-level spec to adapter-specific response.
+        Convert domain-level spec to text that the adapter will parse.
 
-        This is the ONLY place that knows about OpenAI response format.
-        If we switch adapters, only this method changes.
+        This is the ONLY place that knows about adapter response format.
+        LocalLLMAdapter parses <tool_call> tags from text content.
         """
-        TestApp._response_counter += 1
+        # Build content with tool calls as XML tags (SmolLM3 format)
+        content_parts = []
+        if spec.content:
+            content_parts.append(spec.content)
 
-        # Build tool calls if any
-        tool_calls = None
-        if spec.tool_calls:
-            tool_calls = [
-                ChatCompletionMessageToolCall(
-                    id=tc.id,
-                    type="function",
-                    function=Function(
-                        name=tc.name,
-                        arguments=json.dumps(tc.arguments),
-                    ),
-                )
-                for tc in spec.tool_calls
-            ]
+        for tc in spec.tool_calls:
+            tool_call_json = json.dumps({"name": tc.name, "arguments": tc.arguments})
+            content_parts.append(f"<tool_call>{tool_call_json}</tool_call>")
 
-        message = ChatCompletionMessage(
-            role="assistant",
-            content=spec.content,
-            tool_calls=tool_calls,
-        )
-
-        # Map domain stop_reason to OpenAI finish_reason
-        finish_reason_mapping = {
-            "end_turn": "stop",
-            "tool_use": "tool_calls",
-            "max_tokens": "length",
-        }
-        finish_reason = finish_reason_mapping.get(spec.stop_reason, "stop")
-
-        choice = Choice(
-            index=0,
-            message=message,
-            finish_reason=finish_reason,
-            logprobs=None,
-        )
-
-        return ChatCompletion(
-            id=f"chatcmpl_test_{TestApp._response_counter}",
-            object="chat.completion",
-            created=int(time.time()),
-            model="test-model",
-            choices=[choice],
-            usage={
-                "prompt_tokens": 100,
-                "completion_tokens": 50,
-                "total_tokens": 150,
-            },
-        )
+        return " ".join(content_parts) if content_parts else ""
 
 
 @pytest.fixture(scope="session")
-def test_app(memory_service, openai_client, http_app) -> TestApp:
+def test_app(memory_service, llm_adapter, http_app) -> TestApp:
     """
     Provide the encapsulated test application for HTTP tests.
 
@@ -761,14 +656,14 @@ def test_app(memory_service, openai_client, http_app) -> TestApp:
     http_client = HTTPTestClient(http_app)
     return TestApp(
         memory_service=memory_service,
-        llm_adapter=openai_client,
+        llm_adapter=llm_adapter,
         http_client=http_client,
     )
 
 
 @pytest.fixture(scope="session")
 def pubsub_test_app(
-    memory_service, openai_client, agent_app, test_client
+    memory_service, llm_adapter, agent_app, test_client
 ) -> TestApp:
     """
     Provide the encapsulated test application for Pub/Sub tests.
@@ -777,7 +672,7 @@ def pubsub_test_app(
     """
     return TestApp(
         memory_service=memory_service,
-        llm_adapter=openai_client,
+        llm_adapter=llm_adapter,
         pubsub_client=test_client,
     )
 

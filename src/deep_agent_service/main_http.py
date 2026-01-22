@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from deep_agent_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 from deep_agent_service.adapters.prompts.file_adapter import FilePromptAdapter
 from deep_agent_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
+from deep_agent_service.core.protocols import LLMProtocol, PromptProtocol
 from deep_agent_service.services.agent.react_agent import ReActAgent
 from deep_agent_service.services.memory.memory_service import MemoryService
 
@@ -28,8 +29,8 @@ class ChatRequest(BaseModel):
 
 def create_app(
     memory_service: MemoryService,
-    llm_adapter: LocalLLMAdapter,
-    prompt_adapter: FilePromptAdapter,
+    llm_adapter: LLMProtocol,
+    prompt_adapter: PromptProtocol,
     prompt_names: list[str],
 ) -> FastAPI:
     """
@@ -116,13 +117,11 @@ def main() -> None:
         raise ValueError("HTTP_PORT environment variable is required")
     port = int(port_str)
 
-    local_llm_url = os.environ.get("LOCAL_LLM_URL")
-    if not local_llm_url:
-        raise ValueError("LOCAL_LLM_URL environment variable is required")
+    model_name = os.environ.get("MODEL_NAME")
+    if not model_name:
+        raise ValueError("MODEL_NAME environment variable is required")
 
-    local_model_name = os.environ.get("LOCAL_MODEL_NAME")
-    if not local_model_name:
-        raise ValueError("LOCAL_MODEL_NAME environment variable is required")
+    device = os.environ.get("DEVICE", "mps")  # Default to Apple Silicon
 
     prompts_dir = os.environ.get("PROMPTS_DIR")
     if not prompts_dir:
@@ -138,7 +137,7 @@ def main() -> None:
     bucket = gcs_client.bucket(gcs_bucket_name)
 
     # Initialize adapters
-    llm_adapter = LocalLLMAdapter(base_url=local_llm_url, model=local_model_name)
+    llm_adapter = LocalLLMAdapter(model_name=model_name, device=device)
     prompt_adapter = FilePromptAdapter(prompts_dir=prompts_dir)
 
     # Build memory service

@@ -6,10 +6,9 @@ Implements MessageHandler protocol from synapse.
 from synapse.protocols.publisher import PubSubPublisher
 
 from deep_agent_service.core.models import RunAgentRequest, AgentResponse
+from deep_agent_service.core.protocols import LLMProtocol, PromptProtocol
 from deep_agent_service.services.memory.memory_service import MemoryService
 from deep_agent_service.services.agent.react_agent import ReActAgent
-from deep_agent_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
-from deep_agent_service.adapters.prompts.file_adapter import FilePromptAdapter
 
 
 class AgentMessageHandler:
@@ -23,8 +22,8 @@ class AgentMessageHandler:
     def __init__(
         self,
         memory_service: MemoryService,
-        llm_adapter: LocalLLMAdapter,
-        prompt_adapter: FilePromptAdapter,
+        llm_adapter: LLMProtocol,
+        prompt_adapter: PromptProtocol,
         prompt_names: list[str],
         response_topic_path: str,
         publisher: PubSubPublisher,

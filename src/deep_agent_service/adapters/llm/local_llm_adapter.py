@@ -1,25 +1,15 @@
 """
-Adapter for local LLMs served via OpenAI-compatible APIs.
+Adapter for local LLMs using Hugging Face Transformers.
 
-This adapter is designed for local language models (e.g., SmolLM3-3B via mlx_lm.server)
-that expose an OpenAI-compatible HTTP interface but have different behavior from
-cloud-hosted models:
-
-- Text responses may be plain text, not JSON (even when asked for JSON)
-- Responses may be wrapped in markdown code blocks
-- Tool call arguments are always JSON strings (OpenAI API spec)
-
-The adapter handles these local model quirks, normalizing responses to the
-standard format expected by the service layer.
+This adapter uses SmolLM3's native Transformers API with direct tool calling
+support via xml_tools parameter. No OpenAI compatibility layer needed.
 """
 
 import json
-import logging
 import re
 from typing import Any
 
-from openai import OpenAI
-from openai.types.chat import ChatCompletion
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from deep_agent_service.core.models import (
     ContentBlock,
@@ -29,31 +19,26 @@ from deep_agent_service.core.models import (
     ToolUseBlock,
 )
 
-logger = logging.getLogger(__name__)
-
 
 class LocalLLMAdapter:
     """
-    Adapter for local LLMs served via OpenAI-compatible APIs.
+    Adapter for SmolLM3 using native Transformers API.
 
-    Designed for models like SmolLM3-3B running on mlx_lm.server.
-    Handles local model quirks:
-    - Normalizes plain text responses to JSON when structured output requested
-    - Extracts JSON from markdown code blocks
-    - Parses tool call arguments (always JSON strings per OpenAI API spec)
+    Uses apply_chat_template with xml_tools for native tool calling.
+    Parses <tool_call> XML tags from model output.
     """
 
-    def __init__(self, base_url: str, model: str, timeout: float = 120.0):
+    def __init__(self, model_name: str, device: str = "mps"):
         """
-        Initialize adapter for local LLM.
+        Initialize adapter with model from Hugging Face.
 
         Args:
-            base_url: Base URL for the local LLM server (e.g., http://localhost:8080/v1)
-            model: Model identifier as recognized by the local server
-            timeout: Request timeout in seconds (default 120s - local models can be slow)
+            model_name: Hugging Face model identifier (e.g., "HuggingFaceTB/SmolLM3-3B")
+            device: Device to run on ("mps" for Apple Silicon, "cuda", or "cpu")
         """
-        self._client = OpenAI(base_url=base_url, api_key="not-needed", timeout=timeout)
-        self._model = model
+        self._tokenizer = AutoTokenizer.from_pretrained(model_name)
+        self._model = AutoModelForCausalLM.from_pretrained(model_name).to(device)
+        self._device = device
 
     def call(
         self,
@@ -63,154 +48,157 @@ class LocalLLMAdapter:
         output_format: dict[str, Any] | None = None,
     ) -> LLMResponse:
         """
-        Call local LLM via OpenAI-compatible API.
+        Call local LLM using Transformers API.
 
         Args:
             messages: Conversation history in domain format
             system_prompt: System prompt for the agent
-            tools: Optional tool definitions
-            output_format: Optional JSON Schema for structured output.
-                          Local models don't support native structured output,
-                          so this adapter normalizes text responses to valid JSON.
+            tools: Optional tool definitions (passed to xml_tools)
+            output_format: Optional JSON Schema for structured output
 
         Returns:
-            Structured LLMResponse with normalized content
+            Structured LLMResponse
         """
-        api_messages = self._prepare_messages(messages, system_prompt)
+        # Convert to chat format
+        chat_messages = self._prepare_messages(messages, system_prompt)
 
-        kwargs: dict[str, Any] = {
-            "model": self._model,
-            "max_tokens": 4096,
-            "messages": api_messages,
-        }
+        # Convert tools to SmolLM3 format
+        smol_tools = self._convert_tools(tools) if tools else None
 
-        if tools:
-            kwargs["tools"] = self._convert_tools_to_openai_format(tools)
+        # Apply chat template with tools
+        inputs = self._tokenizer.apply_chat_template(
+            chat_messages,
+            xml_tools=smol_tools,
+            enable_thinking=False,
+            add_generation_prompt=True,
+            tokenize=True,
+            return_tensors="pt",
+        ).to(self._device)
 
-        response = self._client.chat.completions.create(**kwargs)
+        # Generate
+        outputs = self._model.generate(
+            inputs,
+            max_new_tokens=4096,
+            temperature=0.6,
+            top_p=0.95,
+            pad_token_id=self._tokenizer.eos_token_id,
+        )
 
-        return self._convert_response_to_domain_format(response, output_format)
+        # Decode only the new tokens (not the input)
+        new_tokens = outputs[0][inputs.shape[-1]:]
+        text = self._tokenizer.decode(new_tokens, skip_special_tokens=True)
+
+        return self._parse_response(text, output_format)
 
     def _prepare_messages(
         self, messages: list[Message], system_prompt: str
-    ) -> list[dict[str, Any]]:
-        """Prepare messages including system prompt for OpenAI format."""
-        api_messages: list[dict[str, Any]] = [
-            {"role": "system", "content": system_prompt}
-        ]
-
+    ) -> list[dict[str, str]]:
+        """Convert domain messages to chat format."""
+        chat_messages = [{"role": "system", "content": system_prompt}]
         for msg in messages:
-            api_messages.append({"role": msg.role, "content": msg.content})
+            chat_messages.append({"role": msg.role, "content": msg.content})
+        return chat_messages
 
-        return api_messages
-
-    def _convert_tools_to_openai_format(
-        self, tools: list[ToolDefinition]
-    ) -> list[dict[str, Any]]:
-        """Convert domain ToolDefinitions to OpenAI format."""
+    def _convert_tools(self, tools: list[ToolDefinition]) -> list[dict[str, Any]]:
+        """Convert domain ToolDefinitions to SmolLM3 format."""
         return [
             {
-                "type": "function",
-                "function": {
-                    "name": tool.name,
-                    "description": tool.description,
-                    "parameters": tool.input_schema,
-                },
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.input_schema,
             }
             for tool in tools
         ]
 
-    def _convert_response_to_domain_format(
-        self,
-        response: ChatCompletion,
-        output_format: dict[str, Any] | None = None,
+    def _parse_response(
+        self, text: str, output_format: dict[str, Any] | None
     ) -> LLMResponse:
         """
-        Convert local LLM response to domain LLMResponse.
+        Parse model output into LLMResponse.
 
-        Handles local model quirks:
-        - Normalizes text to JSON when output_format specified
-        - Parses tool call arguments (always JSON strings)
+        Extracts <tool_call> tags and remaining text content.
         """
         content_blocks: list[ContentBlock | ToolUseBlock] = []
 
-        choice = response.choices[0]
+        # Parse tool calls
+        tool_calls, remaining_text = self._parse_tool_calls(text)
 
-        if choice.message.content:
-            text = choice.message.content
-            # Local models don't support native structured output - normalize text to JSON
+        # Add tool call blocks
+        for i, tool_call in enumerate(tool_calls):
+            content_blocks.append(
+                ToolUseBlock(
+                    id=f"call_{i}",
+                    name=tool_call["name"],
+                    input=tool_call.get("arguments", {}),
+                )
+            )
+
+        # Add text content if any remains
+        if remaining_text.strip():
+            text_content = remaining_text.strip()
             if output_format:
-                text = self._normalize_to_json(text)
-            content_blocks.append(ContentBlock(text=text))
+                text_content = self._normalize_to_json(text_content)
+            content_blocks.append(ContentBlock(text=text_content))
 
-        # Tool calls: OpenAI API always returns arguments as JSON string
-        if choice.message.tool_calls:
-            for tool_call in choice.message.tool_calls:
-                if tool_call.type == "function":
-                    raw_args = tool_call.function.arguments
-                    args = json.loads(raw_args) if raw_args else {}
-                    content_blocks.append(
-                        ToolUseBlock(
-                            id=tool_call.id,
-                            name=tool_call.function.name,
-                            input=args,
-                        )
-                    )
+        # Determine stop reason
+        stop_reason = "tool_use" if tool_calls else "end_turn"
 
-        stop_reason = self._map_finish_reason_to_stop_reason(choice.finish_reason)
+        return LLMResponse(stop_reason=stop_reason, content=content_blocks)
 
-        return LLMResponse(
-            stop_reason=stop_reason,
-            content=content_blocks,
-        )
+    def _parse_tool_calls(self, text: str) -> tuple[list[dict[str, Any]], str]:
+        """
+        Parse <tool_call> tags from SmolLM3 response.
+
+        Returns:
+            Tuple of (list of parsed tool calls, remaining text without tool calls)
+        """
+        tool_calls = []
+        remaining_text = text
+
+        # Find all <tool_call>...</tool_call> patterns
+        pattern = r"<tool_call>\s*(\{.*?\})\s*</tool_call>"
+        matches = re.findall(pattern, text, re.DOTALL)
+
+        for match in matches:
+            tool_call = json.loads(match)
+            tool_calls.append(tool_call)
+            remaining_text = re.sub(
+                r"<tool_call>\s*" + re.escape(match) + r"\s*</tool_call>",
+                "",
+                remaining_text,
+                count=1,
+            )
+
+        return tool_calls, remaining_text
 
     def _normalize_to_json(self, text: str) -> str:
         """
-        Normalize local LLM text response to valid JSON string.
+        Normalize text response to valid JSON string.
 
-        Local models often return plain text or markdown-wrapped JSON
-        even when asked for JSON. This method handles:
+        Handles:
         1. Already valid JSON -> return as-is
         2. JSON in markdown code blocks -> extract it
         3. Plain text -> wrap in {"response": "..."}
-
-        Args:
-            text: Raw text from local LLM response
-
-        Returns:
-            Valid JSON string
         """
         text = text.strip()
 
         # Try 1: Already valid JSON
         try:
             json.loads(text)
-            logger.debug("_normalize_to_json: text is already valid JSON")
             return text
         except json.JSONDecodeError:
             pass
 
-        # Try 2: Extract JSON from markdown code blocks (common local model behavior)
+        # Try 2: Extract JSON from markdown code blocks
         if "```" in text:
             match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
             if match:
                 extracted = match.group(1)
                 try:
                     json.loads(extracted)
-                    logger.debug("_normalize_to_json: extracted JSON from markdown")
                     return extracted
                 except json.JSONDecodeError:
                     pass
 
         # Fallback: Wrap raw text in standard response format
-        logger.debug("_normalize_to_json: wrapping raw text in JSON structure")
         return json.dumps({"response": text})
-
-    def _map_finish_reason_to_stop_reason(self, finish_reason: str) -> str:
-        """Map OpenAI finish_reason to domain stop_reason."""
-        mapping = {
-            "stop": "end_turn",
-            "tool_calls": "tool_use",
-            "length": "max_tokens",
-        }
-        return mapping.get(finish_reason, "end_turn")

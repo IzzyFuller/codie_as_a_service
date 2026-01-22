@@ -176,48 +176,13 @@ class ReActAgent:
             output_format=output_format,
         )
 
-        logger.debug(
-            f"_structure_output: response.content has {len(response.content)} blocks"
-        )
-        for i, block in enumerate(response.content):
-            logger.debug(f"_structure_output: block {i} type={type(block).__name__}")
+        # Adapter guarantees valid JSON when output_format is provided
+        for block in response.content:
             if isinstance(block, ContentBlock):
-                text = block.text.strip()
-                logger.debug(
-                    f"_structure_output: block text (first 200 chars): {text[:200]!r}"
-                )
-                # Try direct JSON parse
-                try:
-                    result = json.loads(text)
-                    logger.debug("_structure_output: JSON parse SUCCESS")
-                    return result
-                except json.JSONDecodeError as e:
-                    logger.debug(f"_structure_output: JSON parse failed: {e}")
-                # Try extracting JSON from markdown code blocks
-                if "```" in text:
-                    import re
+                return json.loads(block.text)
 
-                    match = re.search(
-                        r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL
-                    )
-                    if match:
-                        try:
-                            result = json.loads(match.group(1))
-                            logger.debug(
-                                "_structure_output: markdown JSON parse SUCCESS"
-                            )
-                            return result
-                        except json.JSONDecodeError as e:
-                            logger.debug(
-                                f"_structure_output: markdown JSON parse failed: {e}"
-                            )
-                # Fallback: wrap raw text in expected format
-                logger.debug("_structure_output: using fallback wrapper")
-                return {"response": text_result, "response_text": text_result}
-
-        # No content at all - return the original text
-        logger.debug("_structure_output: no ContentBlock found, using fallback")
-        return {"response": text_result, "response_text": text_result}
+        # No content from LLM - this is an error condition
+        raise ValueError("LLM returned empty content in structure phase")
 
     def _get_tool_definitions(self) -> list[ToolDefinition]:
         """Get available tool definitions."""

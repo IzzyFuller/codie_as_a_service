@@ -10,7 +10,7 @@ from fastapi.responses import StreamingResponse
 from google.cloud import storage
 from pydantic import BaseModel
 
-from deep_agent_service.adapters.llm.openai_adapter import OpenAILLMAdapter
+from deep_agent_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 from deep_agent_service.adapters.prompts.file_adapter import FilePromptAdapter
 from deep_agent_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
 from deep_agent_service.services.agent.react_agent import ReActAgent
@@ -28,7 +28,7 @@ class ChatRequest(BaseModel):
 
 def create_app(
     memory_service: MemoryService,
-    llm_adapter: OpenAILLMAdapter,
+    llm_adapter: LocalLLMAdapter,
     prompt_adapter: FilePromptAdapter,
     prompt_names: list[str],
 ) -> FastAPI:
@@ -138,7 +138,7 @@ def main() -> None:
     bucket = gcs_client.bucket(gcs_bucket_name)
 
     # Initialize adapters
-    llm_adapter = OpenAILLMAdapter(base_url=local_llm_url, model=local_model_name)
+    llm_adapter = LocalLLMAdapter(base_url=local_llm_url, model=local_model_name)
     prompt_adapter = FilePromptAdapter(prompts_dir=prompts_dir)
 
     # Build memory service

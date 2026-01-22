@@ -98,7 +98,7 @@ def main() -> None:
     # Lazy imports for production dependencies
     from google.cloud import pubsub_v1, storage
 
-    from deep_agent_service.adapters.llm.openai_adapter import OpenAILLMAdapter
+    from deep_agent_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
     from deep_agent_service.adapters.prompts.file_adapter import FilePromptAdapter
     from deep_agent_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
     from deep_agent_service.services.memory.memory_service import MemoryService
@@ -142,7 +142,7 @@ def main() -> None:
     subscriber = pubsub_v1.SubscriberClient()
 
     # Initialize adapters
-    llm_adapter = OpenAILLMAdapter(base_url=local_llm_url, model=local_model_name)
+    llm_adapter = LocalLLMAdapter(base_url=local_llm_url, model=local_model_name)
     prompt_adapter = FilePromptAdapter(prompts_dir=prompts_dir)
 
     # Build memory service

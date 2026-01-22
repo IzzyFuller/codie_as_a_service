@@ -6,12 +6,17 @@ import subprocess
 import tempfile
 import time
 import uuid
+from dataclasses import dataclass, field
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 from openai.types.chat import ChatCompletion, ChatCompletionMessage
 from openai.types.chat.chat_completion import Choice
+from openai.types.chat.chat_completion_message_tool_call import (
+    ChatCompletionMessageToolCall,
+    Function,
+)
 from google.cloud import firestore, storage
 from google.cloud import pubsub_v1
 
@@ -23,6 +28,34 @@ from deep_agent_service.services.memory.memory_service import MemoryService
 from deep_agent_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
 from deep_agent_service.main_pubsub import create_app
 from deep_agent_service.main_http import create_app as create_http_app
+
+# ============================================================================
+# Domain-Level Test Response Specs (Adapter-Agnostic)
+# ============================================================================
+
+
+@dataclass
+class ToolCallSpec:
+    """Domain-level tool call specification for tests."""
+
+    name: str
+    arguments: dict = field(default_factory=dict)
+    id: str = field(default_factory=lambda: f"tool_{uuid.uuid4().hex[:8]}")
+
+
+@dataclass
+class LLMResponseSpec:
+    """
+    Domain-level LLM response specification for tests.
+
+    Tests describe responses in domain terms. The TestApp converts
+    these to adapter-specific formats internally.
+    """
+
+    stop_reason: str  # "end_turn" | "tool_use"
+    content: str | None = None
+    tool_calls: list[ToolCallSpec] = field(default_factory=list)
+
 
 # Test configuration
 PROJECT_ID = "test-project"
@@ -308,33 +341,7 @@ def test_client(pubsub_infrastructure):
 
 
 # ============================================================================
-# Test User Factory Fixture
-# ============================================================================
-
-
-@pytest.fixture
-def create_test_session_with_user(memory_service):
-    """Factory fixture for creating test users with identity and session."""
-
-    def _create() -> tuple[str, str]:
-        user_id = str(uuid.uuid4())
-        session_id = str(uuid.uuid4())
-
-        memory_service.write_memory(user_id=user_id, key="me", content="# Identity")
-        memory_service.write_memory(
-            user_id=user_id, key="context_anchors", content="# Anchors"
-        )
-        memory_service.write_memory(
-            user_id=user_id, key="current_session", content="# Session"
-        )
-
-        return user_id, session_id
-
-    return _create
-
-
-# ============================================================================
-# OpenAI SDK Fixtures
+# OpenAI SDK Fixtures (Internal - Used by TestApp)
 # ============================================================================
 
 # Message counter for unique IDs
@@ -406,26 +413,16 @@ def _create_openai_response(
 
 
 @pytest.fixture(scope="session")
-def create_openai_response():
-    """Fixture that returns the response factory function for use in tests."""
-    return _create_openai_response
-
-
-@pytest.fixture(scope="session")
 def openai_client():
     """Real OpenAI adapter with only chat.completions.create mocked.
 
-    Tests configure the mock's return_value or side_effect as needed:
-        openai_client._client.chat.completions.create.return_value = create_openai_response(...)
-        openai_client._client.chat.completions.create.side_effect = [response1, response2]
-
-    This follows the same pattern as the old Anthropic adapter testing:
-    use real adapter, mock only the network call.
+    Used internally by TestApp. Tests should not use this fixture directly -
+    use test_app.stub_llm_responses() instead.
     """
-    from deep_agent_service.adapters.llm.openai_adapter import OpenAILLMAdapter
+    from deep_agent_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 
     # Create real adapter (base_url doesn't matter since we mock the network call)
-    adapter = OpenAILLMAdapter(base_url="http://localhost:8080/v1", model="test-model")
+    adapter = LocalLLMAdapter(base_url="http://localhost:8080/v1", model="test-model")
 
     # Only mock the method that would hit the network
     adapter._client.chat.completions.create = MagicMock()
@@ -554,6 +551,235 @@ class HTTPTestClient:
                     events.append(current_event)
 
         return events
+
+
+# ============================================================================
+# TestApp - Encapsulated Test Application (Adapter-Agnostic)
+# ============================================================================
+
+
+class TestApp:
+    """
+    Encapsulates the entire test application.
+
+    Tests interact ONLY through this class. Implementation details
+    (which adapter, how it's wired) are hidden. If we change adapters,
+    only this class needs to change - not the tests.
+    """
+
+    # Counter for generating unique OpenAI response IDs
+    _response_counter = 0
+
+    def __init__(
+        self,
+        memory_service,
+        llm_adapter,
+        http_client=None,
+        pubsub_client=None,
+    ):
+        self._memory_service = memory_service
+        self._llm_adapter = llm_adapter
+        self._http_client = http_client
+        self._pubsub_client = pubsub_client
+        self._default_response = self._to_adapter_response(
+            LLMResponseSpec(stop_reason="end_turn", content="I'm ready to help you.")
+        )
+
+    def setup_user(
+        self,
+        memory: dict[str, str] | None = None,
+    ) -> tuple[str, str]:
+        """
+        Create a test user with given memory contents.
+
+        Args:
+            memory: Optional dict of memory key -> content.
+                   Defaults to minimal identity if not provided.
+
+        Returns:
+            Tuple of (user_id, session_id)
+        """
+        user_id = str(uuid.uuid4())
+        session_id = str(uuid.uuid4())
+
+        # Default minimal memory if not specified
+        if memory is None:
+            memory = {
+                "me": "# Identity",
+                "context_anchors": "# Anchors",
+                "current_session": "# Session",
+            }
+
+        for key, content in memory.items():
+            self._memory_service.write_memory(user_id=user_id, key=key, content=content)
+
+        return user_id, session_id
+
+    def stub_llm_responses(self, *responses: LLMResponseSpec) -> None:
+        """
+        Configure LLM to return these responses in sequence.
+
+        Args:
+            responses: Domain-level response specs. Converted internally
+                      to adapter-specific format.
+        """
+        adapter_responses = [self._to_adapter_response(r) for r in responses]
+        self._llm_adapter._client.chat.completions.create.side_effect = (
+            adapter_responses
+        )
+
+    def reset_llm(self) -> None:
+        """Reset LLM mock to default state."""
+        self._llm_adapter._client.chat.completions.create.side_effect = None
+        self._llm_adapter._client.chat.completions.create.return_value = (
+            self._default_response
+        )
+
+    def chat(
+        self,
+        user_id: str,
+        session_id: str,
+        message: str,
+        output_format: dict | None = None,
+    ) -> list[dict]:
+        """
+        Make a chat request and return SSE events.
+
+        Args:
+            user_id: User identifier
+            session_id: Session identifier
+            message: User message
+            output_format: Optional JSON schema for structured output
+
+        Returns:
+            List of SSE events as dicts with 'event' and 'data' keys
+        """
+        return self._http_client.chat(user_id, session_id, message, output_format)
+
+    def read_memory(self, user_id: str, key: str) -> str | None:
+        """Read user memory (for verifying side effects)."""
+        return self._memory_service.read_memory(user_id=user_id, key=key)
+
+    def write_memory(self, user_id: str, key: str, content: str) -> None:
+        """Write user memory (for test setup)."""
+        self._memory_service.write_memory(user_id=user_id, key=key, content=content)
+
+    def send_pubsub_request(
+        self,
+        user_id: str,
+        session_id: str,
+        message: str,
+        output_format: dict | None = None,
+        timeout_seconds: int = 10,
+    ) -> AgentResponse | None:
+        """
+        Send a Pub/Sub request and wait for response.
+
+        Args:
+            user_id: User identifier
+            session_id: Session identifier
+            message: User message
+            output_format: Optional JSON schema for structured output
+            timeout_seconds: How long to wait for response
+
+        Returns:
+            AgentResponse or None if timeout
+        """
+        if self._pubsub_client is None:
+            raise RuntimeError("TestApp not configured for Pub/Sub tests")
+        return self._pubsub_client.send_request(
+            user_id, session_id, message, output_format, timeout_seconds
+        )
+
+    def _to_adapter_response(self, spec: LLMResponseSpec) -> ChatCompletion:
+        """
+        Convert domain-level spec to adapter-specific response.
+
+        This is the ONLY place that knows about OpenAI response format.
+        If we switch adapters, only this method changes.
+        """
+        TestApp._response_counter += 1
+
+        # Build tool calls if any
+        tool_calls = None
+        if spec.tool_calls:
+            tool_calls = [
+                ChatCompletionMessageToolCall(
+                    id=tc.id,
+                    type="function",
+                    function=Function(
+                        name=tc.name,
+                        arguments=json.dumps(tc.arguments),
+                    ),
+                )
+                for tc in spec.tool_calls
+            ]
+
+        message = ChatCompletionMessage(
+            role="assistant",
+            content=spec.content,
+            tool_calls=tool_calls,
+        )
+
+        # Map domain stop_reason to OpenAI finish_reason
+        finish_reason_mapping = {
+            "end_turn": "stop",
+            "tool_use": "tool_calls",
+            "max_tokens": "length",
+        }
+        finish_reason = finish_reason_mapping.get(spec.stop_reason, "stop")
+
+        choice = Choice(
+            index=0,
+            message=message,
+            finish_reason=finish_reason,
+            logprobs=None,
+        )
+
+        return ChatCompletion(
+            id=f"chatcmpl_test_{TestApp._response_counter}",
+            object="chat.completion",
+            created=int(time.time()),
+            model="test-model",
+            choices=[choice],
+            usage={
+                "prompt_tokens": 100,
+                "completion_tokens": 50,
+                "total_tokens": 150,
+            },
+        )
+
+
+@pytest.fixture(scope="session")
+def test_app(memory_service, openai_client, http_app) -> TestApp:
+    """
+    Provide the encapsulated test application for HTTP tests.
+
+    This is the PRIMARY fixture HTTP tests should use. It hides all
+    implementation details about adapters and wiring.
+    """
+    http_client = HTTPTestClient(http_app)
+    return TestApp(
+        memory_service=memory_service,
+        llm_adapter=openai_client,
+        http_client=http_client,
+    )
+
+
+@pytest.fixture(scope="session")
+def pubsub_test_app(
+    memory_service, openai_client, agent_app, test_client
+) -> TestApp:
+    """
+    Provide the encapsulated test application for Pub/Sub tests.
+
+    This is the PRIMARY fixture Pub/Sub tests should use.
+    """
+    return TestApp(
+        memory_service=memory_service,
+        llm_adapter=openai_client,
+        pubsub_client=test_client,
+    )
 
 
 @pytest.fixture(scope="session")

@@ -4,51 +4,40 @@ E2E Acceptance Test: Agent Pub/Sub Message Processing
 Tests describe the system from a CLIENT perspective:
 - Client publishes RunAgentRequest to request topic
 - Client listens on response topic for AgentResponse
-- Client knows NOTHING about handlers, agents, memory services, etc.
+- Client knows NOTHING about handlers, agents, adapters, memory services, etc.
 
-Mocking Strategy:
-- Real Pub/Sub emulator (Docker)
-- Real GCS emulator for memory
-- The APP (not tests) will use mocked OpenAI/Langfuse SDKs
+Tests use TestApp which encapsulates all implementation details.
+If we change LLM adapters, only TestApp needs to change - not these tests.
 """
 
 import pytest
+
+from tests.conftest import LLMResponseSpec
 
 
 @pytest.mark.integration
 class TestE2EAgentPubSub:
     """E2E acceptance tests from client perspective."""
 
-    def test_publish_request_and_receive_response(
-        self,
-        agent_app,
-        test_client,
-        openai_client,
-        create_openai_response,
-        create_test_session_with_user,
-    ):
+    def test_publish_request_and_receive_response(self, pubsub_test_app):
         """
         Given: A user exists with identity in memory
         When: Client publishes RunAgentRequest to request topic
         Then: Client receives AgentResponse on response topic
         """
-        user_id, session_id = create_test_session_with_user()
+        user_id, session_id = pubsub_test_app.setup_user()
 
-        # Configure mock for two-phase approach (ReAct loop + structure output)
-        openai_client._client.chat.completions.create.side_effect = [
+        # Configure LLM responses for two-phase flow
+        pubsub_test_app.stub_llm_responses(
             # Phase 1: ReAct loop response
-            create_openai_response(
-                stop_reason="end_turn",
-                content="I'm ready to help you.",
-            ),
+            LLMResponseSpec(stop_reason="end_turn", content="I'm ready to help you."),
             # Phase 2: Default structured output format
-            create_openai_response(
-                stop_reason="end_turn",
-                content='{"response": "I\'m ready to help you."}',
+            LLMResponseSpec(
+                stop_reason="end_turn", content='{"response": "I\'m ready to help you."}'
             ),
-        ]
+        )
 
-        response = test_client.send_request(
+        response = pubsub_test_app.send_pubsub_request(
             user_id, session_id, "Hello, can you help me?"
         )
 
@@ -57,26 +46,15 @@ class TestE2EAgentPubSub:
         assert response.session_id == session_id
         assert response.status == "success"
 
-        # Reset mock for other tests
-        openai_client._client.chat.completions.create.side_effect = None
-        openai_client._client.chat.completions.create.return_value = (
-            create_openai_response(
-                stop_reason="end_turn",
-                content="I'm ready to help you.",
-            )
-        )
+        pubsub_test_app.reset_llm()
 
-    def test_receive_error_response_when_processing_fails(
-        self,
-        agent_app,
-        test_client,
-    ):
+    def test_receive_error_response_when_processing_fails(self, pubsub_test_app):
         """
         Given: A request for a non-existent user
         When: Client publishes RunAgentRequest
         Then: Client receives AgentResponse with error status
         """
-        response = test_client.send_request(
+        response = pubsub_test_app.send_pubsub_request(
             "nonexistent_user", "some_session", "This should fail"
         )
 
@@ -84,34 +62,23 @@ class TestE2EAgentPubSub:
         assert response.user_id == "nonexistent_user"
         assert response.status == "error"
 
-    def test_structured_output_returns_response_data(
-        self,
-        agent_app,
-        test_client,
-        openai_client,
-        create_openai_response,
-        create_test_session_with_user,
-    ):
+    def test_structured_output_returns_response_data(self, pubsub_test_app):
         """
         Given: Client sends request with output_format schema
         When: Agent processes with two-phase approach (ReAct loop then structure output)
         Then: Client receives AgentResponse with response_data containing structured output
         """
-        user_id, session_id = create_test_session_with_user()
+        user_id, session_id = pubsub_test_app.setup_user()
 
-        # Configure mock to return text from ReAct loop, then JSON in structured output phase
-        openai_client._client.chat.completions.create.side_effect = [
+        # Configure LLM responses for two-phase flow
+        pubsub_test_app.stub_llm_responses(
             # Phase 1: ReAct loop response
-            create_openai_response(
-                stop_reason="end_turn",
-                content="Jane is 30 years old",
-            ),
+            LLMResponseSpec(stop_reason="end_turn", content="Jane is 30 years old"),
             # Phase 2: Structured output response
-            create_openai_response(
-                stop_reason="end_turn",
-                content='{"name": "Jane", "age": 30}',
+            LLMResponseSpec(
+                stop_reason="end_turn", content='{"name": "Jane", "age": 30}'
             ),
-        ]
+        )
 
         # Define output schema
         output_format = {
@@ -126,7 +93,7 @@ class TestE2EAgentPubSub:
             },
         }
 
-        response = test_client.send_request(
+        response = pubsub_test_app.send_pubsub_request(
             user_id,
             session_id,
             "Extract person info: Jane is 30 years old",
@@ -142,11 +109,4 @@ class TestE2EAgentPubSub:
         assert response.response_data["name"] == "Jane"
         assert response.response_data["age"] == 30
 
-        # Reset mock for other tests
-        openai_client._client.chat.completions.create.side_effect = None
-        openai_client._client.chat.completions.create.return_value = (
-            create_openai_response(
-                stop_reason="end_turn",
-                content="I'm ready to help you.",
-            )
-        )
+        pubsub_test_app.reset_llm()

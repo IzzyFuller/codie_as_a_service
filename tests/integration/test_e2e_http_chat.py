@@ -4,51 +4,40 @@ E2E Acceptance Test: HTTP Chat Endpoint
 Tests describe the system from a CLIENT perspective:
 - Client POSTs to /chat endpoint with user_id, session_id, message
 - Client receives SSE stream with text events and done event
-- Client knows NOTHING about handlers, agents, memory services, etc.
+- Client knows NOTHING about handlers, agents, adapters, memory services, etc.
 
-Mocking Strategy:
-- Real GCS emulator for memory (Docker)
-- The APP (not tests) will use mocked OpenAI/Langfuse SDKs
+Tests use TestApp which encapsulates all implementation details.
+If we change LLM adapters, only TestApp needs to change - not these tests.
 """
 
-import json
 import pytest
+
+from tests.conftest import LLMResponseSpec, ToolCallSpec
 
 
 @pytest.mark.integration
 class TestE2EHTTPChat:
     """E2E acceptance tests for HTTP chat endpoint from client perspective."""
 
-    def test_post_chat_returns_streaming_response(
-        self,
-        http_app,
-        http_test_client,
-        openai_client,
-        create_openai_response,
-        create_test_session_with_user,
-    ):
+    def test_post_chat_returns_streaming_response(self, test_app):
         """
         Given: A user exists with identity in memory (no output_format specified)
         When: Client POSTs to /chat with message
         Then: Client receives SSE stream with response event containing default structured format
         """
-        user_id, session_id = create_test_session_with_user()
+        user_id, session_id = test_app.setup_user()
 
-        # Configure mock to return text from ReAct loop, then default JSON format
-        openai_client._client.chat.completions.create.side_effect = [
+        # Configure LLM responses for two-phase flow
+        test_app.stub_llm_responses(
             # Phase 1: ReAct loop response
-            create_openai_response(
-                stop_reason="end_turn",
-                content="I'm ready to help you.",
-            ),
+            LLMResponseSpec(stop_reason="end_turn", content="I'm ready to help you."),
             # Phase 2: Default structured output format {"response": "text"}
-            create_openai_response(
-                stop_reason="end_turn",
-                content='{"response": "I\'m ready to help you."}',
+            LLMResponseSpec(
+                stop_reason="end_turn", content='{"response": "I\'m ready to help you."}'
             ),
-        ]
+        )
 
-        events = http_test_client.chat(user_id, session_id, "Hello, can you help me?")
+        events = test_app.chat(user_id, session_id, "Hello, can you help me?")
 
         # Should receive exactly one response event and a done event
         response_events = [e for e in events if e["event"] == "response"]
@@ -68,28 +57,15 @@ class TestE2EHTTPChat:
         done_data = done_events[0]["data"]
         assert "usage" in done_data
 
-        # Reset mock for other tests
-        openai_client._client.chat.completions.create.side_effect = None
-        openai_client._client.chat.completions.create.return_value = (
-            create_openai_response(
-                stop_reason="end_turn",
-                content="I'm ready to help you.",
-            )
-        )
+        test_app.reset_llm()
 
-    def test_chat_returns_error_for_nonexistent_user(
-        self,
-        http_app,
-        http_test_client,
-    ):
+    def test_chat_returns_error_for_nonexistent_user(self, test_app):
         """
         Given: A request for a non-existent user
         When: Client POSTs to /chat
         Then: Client receives error response
         """
-        events = http_test_client.chat(
-            "nonexistent_user", "some_session", "This should fail"
-        )
+        events = test_app.chat("nonexistent_user", "some_session", "This should fail")
 
         # Should receive an error event
         error_events = [e for e in events if e["event"] == "error"]
@@ -98,15 +74,7 @@ class TestE2EHTTPChat:
         error_data = error_events[0]["data"]
         assert "message" in error_data
 
-    def test_agent_writes_memory_when_tool_is_used(
-        self,
-        http_app,
-        http_test_client,
-        openai_client,
-        create_openai_response,
-        memory_service,
-        create_test_session_with_user,
-    ):
+    def test_agent_writes_memory_when_tool_is_used(self, test_app):
         """
         Given: Client sends a request that triggers write_memory tool
         When: Agent processes the request and uses the tool
@@ -116,73 +84,44 @@ class TestE2EHTTPChat:
         memory contains expected content afterward. Client doesn't
         know HOW it happened, just that it DID happen.
         """
-        user_id, session_id = create_test_session_with_user()
+        user_id, session_id = test_app.setup_user()
 
-        # Configure mock to simulate agent using write_memory tool + structure output
-        openai_client._client.chat.completions.create.side_effect = [
+        # Configure LLM to use write_memory tool
+        test_app.stub_llm_responses(
             # Phase 1: ReAct loop - tool use
-            create_openai_response(
+            LLMResponseSpec(
                 stop_reason="tool_use",
                 content="I'll save that preference.",
                 tool_calls=[
-                    {
-                        "id": "tool_write_1",
-                        "type": "function",
-                        "function": {
-                            "name": "write_memory",
-                            "arguments": json.dumps(
-                                {
-                                    "key": "current_session",
-                                    "content": "# Session\n\nUser prefers dark mode.",
-                                }
-                            ),
+                    ToolCallSpec(
+                        name="write_memory",
+                        arguments={
+                            "key": "current_session",
+                            "content": "# Session\n\nUser prefers dark mode.",
                         },
-                    }
+                    )
                 ],
             ),
             # Phase 1: ReAct loop - final response
-            create_openai_response(
-                stop_reason="end_turn",
-                content="Got it!",
-            ),
+            LLMResponseSpec(stop_reason="end_turn", content="Got it!"),
             # Phase 2: Default structured output format
-            create_openai_response(
-                stop_reason="end_turn",
-                content='{"response": "Got it!"}',
-            ),
-        ]
+            LLMResponseSpec(stop_reason="end_turn", content='{"response": "Got it!"}'),
+        )
 
         # Client sends request
-        events = http_test_client.chat(
-            user_id, session_id, "Remember I prefer dark mode"
-        )
+        events = test_app.chat(user_id, session_id, "Remember I prefer dark mode")
 
         # Request completed successfully
         done_events = [e for e in events if e["event"] == "done"]
         assert len(done_events) == 1
 
         # E2E verification: memory contains the written content
-        content = memory_service.read_memory(user_id=user_id, key="current_session")
+        content = test_app.read_memory(user_id, "current_session")
         assert "dark mode" in content
 
-        # Reset mock for other tests
-        openai_client._client.chat.completions.create.side_effect = None
-        openai_client._client.chat.completions.create.return_value = (
-            create_openai_response(
-                stop_reason="end_turn",
-                content="I'm ready to help you.",
-            )
-        )
+        test_app.reset_llm()
 
-    def test_agent_reads_memory_when_tool_is_used(
-        self,
-        http_app,
-        http_test_client,
-        openai_client,
-        create_openai_response,
-        memory_service,
-        create_test_session_with_user,
-    ):
+    def test_agent_reads_memory_when_tool_is_used(self, test_app):
         """
         Given: User has specific content in memory
         When: Client sends request that triggers read_memory tool
@@ -192,68 +131,41 @@ class TestE2EHTTPChat:
         We can't verify the response content (mock is predetermined),
         but we verify the flow completes without error.
         """
-        user_id, session_id = create_test_session_with_user()
+        user_id, session_id = test_app.setup_user()
 
         # Pre-populate memory with content
-        memory_service.write_memory(
-            user_id=user_id,
-            key="current_session",
-            content="# Session\n\nWorking on PROJECT_ALPHA.",
+        test_app.write_memory(
+            user_id, "current_session", "# Session\n\nWorking on PROJECT_ALPHA."
         )
 
-        # Configure mock to simulate agent using read_memory tool + structure output
-        openai_client._client.chat.completions.create.side_effect = [
+        # Configure LLM to use read_memory tool
+        test_app.stub_llm_responses(
             # Phase 1: ReAct loop - tool use
-            create_openai_response(
+            LLMResponseSpec(
                 stop_reason="tool_use",
                 content="Let me check.",
                 tool_calls=[
-                    {
-                        "id": "tool_read_1",
-                        "type": "function",
-                        "function": {
-                            "name": "read_memory",
-                            "arguments": json.dumps({"key": "current_session"}),
-                        },
-                    }
+                    ToolCallSpec(name="read_memory", arguments={"key": "current_session"})
                 ],
             ),
             # Phase 1: ReAct loop - final response
-            create_openai_response(
-                stop_reason="end_turn",
-                content="You're on PROJECT_ALPHA.",
-            ),
+            LLMResponseSpec(stop_reason="end_turn", content="You're on PROJECT_ALPHA."),
             # Phase 2: Default structured output format
-            create_openai_response(
-                stop_reason="end_turn",
-                content='{"response": "You\'re on PROJECT_ALPHA."}',
+            LLMResponseSpec(
+                stop_reason="end_turn", content='{"response": "You\'re on PROJECT_ALPHA."}'
             ),
-        ]
+        )
 
         # Client sends request
-        events = http_test_client.chat(user_id, session_id, "What am I working on?")
+        events = test_app.chat(user_id, session_id, "What am I working on?")
 
         # Request completed successfully (tool execution worked)
         done_events = [e for e in events if e["event"] == "done"]
         assert len(done_events) == 1
 
-        # Reset mock for other tests
-        openai_client._client.chat.completions.create.side_effect = None
-        openai_client._client.chat.completions.create.return_value = (
-            create_openai_response(
-                stop_reason="end_turn",
-                content="I'm ready to help you.",
-            )
-        )
+        test_app.reset_llm()
 
-    def test_agent_stops_at_max_iterations(
-        self,
-        http_app,
-        http_test_client,
-        openai_client,
-        create_openai_response,
-        create_test_session_with_user,
-    ):
+    def test_agent_stops_at_max_iterations(self, test_app):
         """
         Given: LLM keeps requesting tool use indefinitely
         When: Agent reaches max iterations limit
@@ -262,84 +174,55 @@ class TestE2EHTTPChat:
         This tests the safety mechanism from client perspective:
         even if something goes wrong, client gets a response.
         """
-        user_id, session_id = create_test_session_with_user()
+        user_id, session_id = test_app.setup_user()
 
-        # Configure mock to always request tool use (infinite loop scenario) + final structure
-        # The ReAct loop will hit max iterations, then structure output needs one more mock
-        tool_use_response = create_openai_response(
+        # Configure LLM to always request tool use (infinite loop scenario)
+        tool_loop_response = LLMResponseSpec(
             stop_reason="tool_use",
             content="Let me check more...",
             tool_calls=[
-                {
-                    "id": "tool_loop",
-                    "type": "function",
-                    "function": {
-                        "name": "read_memory",
-                        "arguments": json.dumps({"key": "current_session"}),
-                    },
-                }
+                ToolCallSpec(name="read_memory", arguments={"key": "current_session"})
             ],
         )
 
-        # Set up mock to return tool_calls repeatedly during ReAct loop, then structure output
         # max_iterations defaults to 10, so 10 tool_calls responses + 1 structure output
-        openai_client._client.chat.completions.create.side_effect = (
-            [tool_use_response] * 10  # Hit max_iterations exactly
-            + [
-                create_openai_response(
-                    stop_reason="end_turn",
-                    content='{"response": "I couldn\'t complete the request."}',
-                )
-            ]
+        test_app.stub_llm_responses(
+            *([tool_loop_response] * 10),
+            LLMResponseSpec(
+                stop_reason="end_turn",
+                content='{"response": "I couldn\'t complete the request."}',
+            ),
         )
 
         # Client sends request
-        events = http_test_client.chat(user_id, session_id, "Help me")
+        events = test_app.chat(user_id, session_id, "Help me")
 
         # Request completed (agent stopped at max iterations)
         done_events = [e for e in events if e["event"] == "done"]
         assert len(done_events) == 1
 
-        # Verify multiple iterations occurred
-        assert openai_client._client.chat.completions.create.call_count >= 3
+        test_app.reset_llm()
 
-        # Reset mock for other tests
-        openai_client._client.chat.completions.create.side_effect = None
-        openai_client._client.chat.completions.create.return_value = (
-            create_openai_response(
-                stop_reason="end_turn",
-                content="I'm ready to help you.",
-            )
-        )
-
-    def test_structured_output_returns_structured_event(
-        self,
-        http_app,
-        http_test_client,
-        openai_client,
-        create_openai_response,
-        create_test_session_with_user,
-    ):
+    def test_structured_output_returns_structured_event(self, test_app):
         """
         Given: Client sends request with output_format schema
         When: Agent processes with two-phase approach (ReAct loop then structure output)
         Then: Client receives SSE stream with response event containing JSON data
         """
-        user_id, session_id = create_test_session_with_user()
+        user_id, session_id = test_app.setup_user()
 
-        # Configure mock to return text from ReAct loop, then JSON in structured output phase
-        openai_client._client.chat.completions.create.side_effect = [
+        # Configure LLM responses for two-phase flow
+        test_app.stub_llm_responses(
             # Phase 1: ReAct loop response
-            create_openai_response(
-                stop_reason="end_turn",
-                content="John's email is [email protected]",
+            LLMResponseSpec(
+                stop_reason="end_turn", content="John's email is [email protected]"
             ),
             # Phase 2: Structured output response
-            create_openai_response(
+            LLMResponseSpec(
                 stop_reason="end_turn",
                 content='{"name": "John", "email": "[email protected]"}',
             ),
-        ]
+        )
 
         # Define output schema
         output_format = {
@@ -355,11 +238,8 @@ class TestE2EHTTPChat:
         }
 
         # Client sends request with output_format
-        events = http_test_client.chat(
-            user_id,
-            session_id,
-            "Extract contact: John ([email protected])",
-            output_format=output_format,
+        events = test_app.chat(
+            user_id, session_id, "Extract contact: John ([email protected])", output_format
         )
 
         # Should receive response event (always)
@@ -374,43 +254,23 @@ class TestE2EHTTPChat:
         assert response_data["name"] == "John"
         assert response_data["email"] == "[email protected]"
 
-        # Reset mock for other tests
-        openai_client._client.chat.completions.create.side_effect = None
-        openai_client._client.chat.completions.create.return_value = (
-            create_openai_response(
-                stop_reason="end_turn",
-                content="I'm ready to help you.",
-            )
-        )
+        test_app.reset_llm()
 
-    def test_structured_output_with_empty_response_returns_error(
-        self,
-        http_app,
-        http_test_client,
-        openai_client,
-        create_openai_response,
-        create_test_session_with_user,
-    ):
+    def test_structured_output_with_empty_response_returns_error(self, test_app):
         """
         Given: Client sends request with output_format schema
         When: LLM returns empty content in structure phase (edge case)
         Then: Client receives error event
         """
-        user_id, session_id = create_test_session_with_user()
+        user_id, session_id = test_app.setup_user()
 
-        # Configure mock to return text in ReAct loop, then empty content in structure phase
-        openai_client._client.chat.completions.create.side_effect = [
+        # Configure LLM to return text in ReAct loop, then empty content in structure phase
+        test_app.stub_llm_responses(
             # Phase 1: ReAct loop response
-            create_openai_response(
-                stop_reason="end_turn",
-                content="Some text result",
-            ),
+            LLMResponseSpec(stop_reason="end_turn", content="Some text result"),
             # Phase 2: Structured output response (empty - error case)
-            create_openai_response(
-                stop_reason="end_turn",
-                content=None,  # Empty content - should trigger error
-            ),
-        ]
+            LLMResponseSpec(stop_reason="end_turn", content=None),
+        )
 
         # Define output schema
         output_format = {
@@ -422,22 +282,122 @@ class TestE2EHTTPChat:
         }
 
         # Client sends request with output_format
-        events = http_test_client.chat(
-            user_id,
-            session_id,
-            "Extract something",
-            output_format=output_format,
-        )
+        events = test_app.chat(user_id, session_id, "Extract something", output_format)
 
         # Should receive error event due to empty content in structure phase
         error_events = [e for e in events if e["event"] == "error"]
         assert len(error_events) == 1, "Expected exactly one error event"
 
-        # Reset mock for other tests
-        openai_client._client.chat.completions.create.side_effect = None
-        openai_client._client.chat.completions.create.return_value = (
-            create_openai_response(
+        test_app.reset_llm()
+
+    def test_adapter_normalizes_markdown_wrapped_json(self, test_app):
+        """
+        Given: LLM returns JSON wrapped in markdown code block (common with local models)
+        When: Agent processes the response
+        Then: JSON is extracted and returned correctly
+        """
+        user_id, session_id = test_app.setup_user()
+
+        # Configure LLM to return markdown-wrapped JSON (simulates local model behavior)
+        test_app.stub_llm_responses(
+            # Phase 1: ReAct loop response
+            LLMResponseSpec(stop_reason="end_turn", content="Found the contact info."),
+            # Phase 2: Structured output with markdown wrapping
+            LLMResponseSpec(
                 stop_reason="end_turn",
-                content="I'm ready to help you.",
-            )
+                content='```json\n{"name": "Alice", "email": "[email protected]"}\n```',
+            ),
         )
+
+        output_format = {
+            "type": "json_schema",
+            "schema": {
+                "type": "object",
+                "properties": {"name": {"type": "string"}, "email": {"type": "string"}},
+            },
+        }
+
+        events = test_app.chat(
+            user_id, session_id, "Extract contact info", output_format
+        )
+
+        response_events = [e for e in events if e["event"] == "response"]
+        assert len(response_events) == 1
+
+        # JSON should be extracted from markdown
+        response_data = response_events[0]["data"]
+        assert response_data["name"] == "Alice"
+        assert response_data["email"] == "[email protected]"
+
+        test_app.reset_llm()
+
+    def test_adapter_wraps_plain_text_in_json(self, test_app):
+        """
+        Given: LLM returns plain text instead of JSON (common with local models)
+        When: Agent processes the response
+        Then: Text is wrapped in standard JSON format
+        """
+        user_id, session_id = test_app.setup_user()
+
+        # Configure LLM to return plain text (simulates local model not following instructions)
+        test_app.stub_llm_responses(
+            # Phase 1: ReAct loop response
+            LLMResponseSpec(stop_reason="end_turn", content="Here's my answer."),
+            # Phase 2: Plain text instead of JSON
+            LLMResponseSpec(
+                stop_reason="end_turn",
+                content="I found the information you requested.",
+            ),
+        )
+
+        output_format = {
+            "type": "json_schema",
+            "schema": {"type": "object", "properties": {"response": {"type": "string"}}},
+        }
+
+        events = test_app.chat(user_id, session_id, "Find information", output_format)
+
+        response_events = [e for e in events if e["event"] == "response"]
+        assert len(response_events) == 1
+
+        # Plain text should be wrapped in {"response": "..."}
+        response_data = response_events[0]["data"]
+        assert "response" in response_data
+        assert "I found the information" in response_data["response"]
+
+        test_app.reset_llm()
+
+    def test_adapter_handles_invalid_json_in_markdown(self, test_app):
+        """
+        Given: LLM returns markdown code block with invalid JSON inside
+        When: Agent processes the response
+        Then: Falls back to wrapping the raw text
+        """
+        user_id, session_id = test_app.setup_user()
+
+        # Configure LLM to return invalid JSON in markdown (edge case)
+        test_app.stub_llm_responses(
+            # Phase 1: ReAct loop response
+            LLMResponseSpec(stop_reason="end_turn", content="Processing..."),
+            # Phase 2: Markdown with invalid JSON inside
+            LLMResponseSpec(
+                stop_reason="end_turn",
+                content='```json\n{invalid json here}\n```',
+            ),
+        )
+
+        output_format = {
+            "type": "json_schema",
+            "schema": {"type": "object", "properties": {"response": {"type": "string"}}},
+        }
+
+        events = test_app.chat(user_id, session_id, "Process data", output_format)
+
+        response_events = [e for e in events if e["event"] == "response"]
+        assert len(response_events) == 1
+
+        # Should fall back to wrapping the original text
+        response_data = response_events[0]["data"]
+        assert "response" in response_data
+
+        test_app.reset_llm()

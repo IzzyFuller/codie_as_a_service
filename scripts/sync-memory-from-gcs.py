@@ -99,7 +99,10 @@ def find_new_notes(gcs_notes: list[dict], local_notes: list[dict]) -> list[dict]
 def main():
     parser = argparse.ArgumentParser(description="Sync session notes from GCS to local")
     parser.add_argument(
-        "user_id", nargs="?", default="demo-user", help="GCS user ID (default: demo-user)"
+        "user_id",
+        nargs="?",
+        default="demo-user",
+        help="GCS user ID (default: demo-user)",
     )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     args = parser.parse_args()

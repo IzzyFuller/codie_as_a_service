@@ -35,6 +35,7 @@ class ReActAgent:
         memory: MemoryService,
         prompt_names: list[str],
         max_iterations: int = 10,
+        session_lines: int | None = 50,
     ):
         """
         Initialize ReAct agent.
@@ -45,12 +46,14 @@ class ReActAgent:
             memory: Memory service for user data
             prompt_names: List of prompt names to fetch and combine for system prompt
             max_iterations: Maximum reasoning iterations before stopping
+            session_lines: Number of recent session lines to include (None for all)
         """
         self._llm = llm
         self._prompts = prompts
         self._memory = memory
         self._prompt_names = prompt_names
         self._max_iterations = max_iterations
+        self._session_lines = session_lines
 
     def process(
         self, user_id: str, message: str, output_format: dict[str, Any] | None = None
@@ -85,7 +88,9 @@ class ReActAgent:
             Text result from ReAct loop
         """
         # Load identity context for system prompt
-        identity = self._memory.get_identity_context(user_id=user_id)
+        identity = self._memory.get_identity_context(
+            user_id=user_id, session_lines=self._session_lines
+        )
 
         # Validate assistant identity exists (me.md equivalent)
         if not identity.me:

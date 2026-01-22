@@ -58,19 +58,27 @@ class MemoryService:
         """
         return self.storage.list_files(user_id=user_id)
 
-    def get_identity_context(self, user_id: str) -> IdentityContext:
+    def get_identity_context(
+        self, user_id: str, session_lines: int | None = None
+    ) -> IdentityContext:
         """
         Load core identity files for a user.
 
         Args:
             user_id: User identifier
+            session_lines: If provided, only return the last N lines of current_session
 
         Returns:
             IdentityContext with current_session, context_anchors, and me
         """
+        current_session = self.read_memory(user_id=user_id, key="current_session") or ""
+
+        if session_lines is not None and current_session:
+            lines = current_session.splitlines()
+            current_session = "\n".join(lines[-session_lines:])
+
         return IdentityContext(
-            current_session=self.read_memory(user_id=user_id, key="current_session")
-            or "",
+            current_session=current_session,
             context_anchors=self.read_memory(user_id=user_id, key="context_anchors")
             or "",
             me=self.read_memory(user_id=user_id, key="me") or "",

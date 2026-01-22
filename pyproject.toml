@@ -48,6 +48,14 @@ omit = [
     "*/main_pubsub.py"
 ]
 
+[tool.mypy]
+ignore_missing_imports = true
+mypy_path = "src"
+packages = ["deep_agent_service"]
+explicit_package_bases = true
+# Relaxed for now - tighten as codebase matures
+disable_error_code = ["attr-defined", "arg-type", "call-arg"]
+
 [tool.coverage.report]
 exclude_lines = [
     "pragma: no cover",

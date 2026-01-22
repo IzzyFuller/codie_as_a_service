@@ -366,11 +366,14 @@ def llm_adapter():
     mock_model.to.return_value = mock_model
 
     # Create adapter without loading real model
-    with patch(
-        "deep_agent_service.adapters.llm.local_llm_adapter.AutoTokenizer"
-    ) as mock_auto_tok, patch(
-        "deep_agent_service.adapters.llm.local_llm_adapter.AutoModelForCausalLM"
-    ) as mock_auto_model:
+    with (
+        patch(
+            "deep_agent_service.adapters.llm.local_llm_adapter.AutoTokenizer"
+        ) as mock_auto_tok,
+        patch(
+            "deep_agent_service.adapters.llm.local_llm_adapter.AutoModelForCausalLM"
+        ) as mock_auto_model,
+    ):
         mock_auto_tok.from_pretrained.return_value = mock_tokenizer
         mock_auto_model.from_pretrained.return_value = mock_model
 
@@ -665,9 +668,7 @@ def test_app(memory_service, llm_adapter, http_app) -> TestApp:
 
 
 @pytest.fixture(scope="session")
-def pubsub_test_app(
-    memory_service, llm_adapter, agent_app, test_client
-) -> TestApp:
+def pubsub_test_app(memory_service, llm_adapter, agent_app, test_client) -> TestApp:
     """
     Provide the encapsulated test application for Pub/Sub tests.
 

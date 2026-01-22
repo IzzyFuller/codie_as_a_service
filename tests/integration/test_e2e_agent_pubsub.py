@@ -33,7 +33,8 @@ class TestE2EAgentPubSub:
             LLMResponseSpec(stop_reason="end_turn", content="I'm ready to help you."),
             # Phase 2: Default structured output format
             LLMResponseSpec(
-                stop_reason="end_turn", content='{"response": "I\'m ready to help you."}'
+                stop_reason="end_turn",
+                content='{"response": "I\'m ready to help you."}',
             ),
         )
 

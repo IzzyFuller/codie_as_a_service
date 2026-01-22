@@ -33,7 +33,8 @@ class TestE2EHTTPChat:
             LLMResponseSpec(stop_reason="end_turn", content="I'm ready to help you."),
             # Phase 2: Default structured output format {"response": "text"}
             LLMResponseSpec(
-                stop_reason="end_turn", content='{"response": "I\'m ready to help you."}'
+                stop_reason="end_turn",
+                content='{"response": "I\'m ready to help you."}',
             ),
         )
 
@@ -145,14 +146,17 @@ class TestE2EHTTPChat:
                 stop_reason="tool_use",
                 content="Let me check.",
                 tool_calls=[
-                    ToolCallSpec(name="read_memory", arguments={"key": "current_session"})
+                    ToolCallSpec(
+                        name="read_memory", arguments={"key": "current_session"}
+                    )
                 ],
             ),
             # Phase 1: ReAct loop - final response
             LLMResponseSpec(stop_reason="end_turn", content="You're on PROJECT_ALPHA."),
             # Phase 2: Default structured output format
             LLMResponseSpec(
-                stop_reason="end_turn", content='{"response": "You\'re on PROJECT_ALPHA."}'
+                stop_reason="end_turn",
+                content='{"response": "You\'re on PROJECT_ALPHA."}',
             ),
         )
 
@@ -239,7 +243,10 @@ class TestE2EHTTPChat:
 
         # Client sends request with output_format
         events = test_app.chat(
-            user_id, session_id, "Extract contact: John ([email protected])", output_format
+            user_id,
+            session_id,
+            "Extract contact: John ([email protected])",
+            output_format,
         )
 
         # Should receive response event (always)
@@ -352,7 +359,10 @@ class TestE2EHTTPChat:
 
         output_format = {
             "type": "json_schema",
-            "schema": {"type": "object", "properties": {"response": {"type": "string"}}},
+            "schema": {
+                "type": "object",
+                "properties": {"response": {"type": "string"}},
+            },
         }
 
         events = test_app.chat(user_id, session_id, "Find information", output_format)
@@ -382,13 +392,16 @@ class TestE2EHTTPChat:
             # Phase 2: Markdown with invalid JSON inside
             LLMResponseSpec(
                 stop_reason="end_turn",
-                content='```json\n{invalid json here}\n```',
+                content="```json\n{invalid json here}\n```",
             ),
         )
 
         output_format = {
             "type": "json_schema",
-            "schema": {"type": "object", "properties": {"response": {"type": "string"}}},
+            "schema": {
+                "type": "object",
+                "properties": {"response": {"type": "string"}},
+            },
         }
 
         events = test_app.chat(user_id, session_id, "Process data", output_format)

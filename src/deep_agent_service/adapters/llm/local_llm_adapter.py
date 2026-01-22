@@ -89,7 +89,7 @@ class LocalLLMAdapter:
         )
 
         # Decode only the new tokens (not the input)
-        new_tokens = outputs[0][input_ids.shape[-1]:]
+        new_tokens = outputs[0][input_ids.shape[-1] :]
         text = self._tokenizer.decode(new_tokens, skip_special_tokens=True)
 
         return self._parse_response(text, output_format)

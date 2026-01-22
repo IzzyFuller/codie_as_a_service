@@ -1,4 +1,4 @@
-"""Pub/Sub entry point for deep agent service.
+"""Pub/Sub entry point for codie_as_a_service.
 
 Uses MessageConsumer from synapse for message handling.
 """
@@ -7,13 +7,23 @@ import os
 import signal
 import threading
 
+import pika
+from google.cloud import storage
 from synapse.consumer.message_consumer import MessageConsumer
 from synapse.protocols.publisher import PubSubPublisher
 from synapse.protocols.subscriber import PubSubSubscriber
 
+from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 from codie_as_a_service.adapters.messaging.pubsub_handler import AgentMessageHandler
+from codie_as_a_service.adapters.messaging.rabbitmq_adapter import (
+    RabbitMQPublisher,
+    RabbitMQSubscriber,
+)
+from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
+from codie_as_a_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
 from codie_as_a_service.core.models import RunAgentRequest
 from codie_as_a_service.core.protocols import MemoryProtocol
+from codie_as_a_service.services.memory.memory_service import MemoryService
 
 
 class AgentApp:
@@ -21,7 +31,7 @@ class AgentApp:
     Main application that listens for requests and processes them.
 
     Uses MessageConsumer from synapse to handle Pub/Sub messages.
-    Subscribes to a Pub/Sub topic, processes incoming RunAgentRequest messages
+    Subscribes to a queue, processes incoming RunAgentRequest messages
     through the ReActAgent, and publishes AgentResponse messages.
     """
 
@@ -94,27 +104,11 @@ def create_app(
 
 
 def main() -> None:
-    """Start the Pub/Sub message consumer."""
-    # Lazy imports for production dependencies
-    from google.cloud import pubsub_v1, storage
-
-    from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
-    from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
-    from codie_as_a_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
-    from codie_as_a_service.services.memory.memory_service import MemoryService
-
+    """Start the message consumer."""
     # Configuration from environment
     gcs_bucket_name = os.environ.get("GCS_BUCKET_NAME")
     if not gcs_bucket_name:
         raise ValueError("GCS_BUCKET_NAME environment variable is required")
-
-    request_subscription_path = os.environ.get("PUBSUB_REQUEST_SUBSCRIPTION")
-    if not request_subscription_path:
-        raise ValueError("PUBSUB_REQUEST_SUBSCRIPTION environment variable is required")
-
-    response_topic_path = os.environ.get("PUBSUB_RESPONSE_TOPIC")
-    if not response_topic_path:
-        raise ValueError("PUBSUB_RESPONSE_TOPIC environment variable is required")
 
     model_name = os.environ.get("MODEL_NAME")
     if not model_name:
@@ -131,13 +125,18 @@ def main() -> None:
         raise ValueError("PROMPT_NAMES environment variable is required")
     prompt_names = [name.strip() for name in prompt_names_str.split(",")]
 
-    # Initialize GCP clients
+    broker_url = os.environ.get("BROKER_URL", "amqp://guest:guest@localhost:5672/")
+    request_subscription = os.environ.get("REQUEST_SUBSCRIPTION", "agent.requests")
+    response_topic = os.environ.get("RESPONSE_TOPIC", "agent.responses")
+
+    # Initialize messaging
+    connection = pika.BlockingConnection(pika.URLParameters(broker_url))
+    publisher = RabbitMQPublisher(connection)
+    subscriber = RabbitMQSubscriber(connection)
+
+    # Initialize GCS client for storage
     gcs_client = storage.Client()
     bucket = gcs_client.bucket(gcs_bucket_name)
-
-    # GCP clients directly implement protocols via structural subtyping (duck typing)
-    publisher = pubsub_v1.PublisherClient()
-    subscriber = pubsub_v1.SubscriberClient()
 
     # Initialize adapters
     llm_adapter = LocalLLMAdapter(model_name=model_name, device=device)
@@ -154,14 +153,14 @@ def main() -> None:
         prompt_names=prompt_names,
         publisher=publisher,
         subscriber=subscriber,
-        request_subscription_path=request_subscription_path,
-        response_topic_path=response_topic_path,
+        request_subscription_path=request_subscription,
+        response_topic_path=response_topic,
     )
 
     # Handle graceful shutdown
     shutdown_event = threading.Event()
 
-    def signal_handler(signum, frame):
+    def signal_handler(signum, _frame):
         print(f"\nReceived signal {signum}, shutting down...")
         shutdown_event.set()
 
@@ -169,7 +168,7 @@ def main() -> None:
     signal.signal(signal.SIGTERM, signal_handler)
 
     # Start and wait
-    print(f"Starting Pub/Sub consumer on {request_subscription_path}...")
+    print(f"Starting message handler on {request_subscription}...")
     app.start()
 
     try:

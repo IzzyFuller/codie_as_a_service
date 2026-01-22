@@ -10,7 +10,10 @@ Tests use TestApp which encapsulates all implementation details.
 If we change LLM adapters, only TestApp needs to change - not these tests.
 """
 
+import time
+
 import pytest
+import torch
 
 from tests.conftest import LLMResponseSpec
 
@@ -109,5 +112,32 @@ class TestE2EAgentPubSub:
         assert response.response_data is not None
         assert response.response_data["name"] == "Jane"
         assert response.response_data["age"] == 30
+
+        pubsub_test_app.reset_llm()
+
+    def test_slow_llm_causes_client_timeout(self, pubsub_test_app):
+        """
+        Given: LLM takes longer than the client timeout
+        When: Client publishes request and waits for response
+        Then: Client times out and receives None
+
+        This exercises the RabbitMQ subscriber's timeout path (inactivity_timeout).
+        """
+        user_id, session_id = pubsub_test_app.setup_user()
+
+        # Make LLM mock sleep longer than our timeout
+        def slow_generate(*args, **kwargs):
+            time.sleep(3.0)  # Sleep 3 seconds
+            return torch.tensor([[1, 2, 3, 4, 5, 6]])
+
+        pubsub_test_app._llm_adapter._model.generate.side_effect = slow_generate
+
+        # Use short timeout (2 seconds) - shorter than the 3 second sleep
+        response = pubsub_test_app.send_pubsub_request(
+            user_id, session_id, "Hello", timeout_seconds=2
+        )
+
+        # Should timeout and return None
+        assert response is None, "Expected timeout (None), but got a response"
 
         pubsub_test_app.reset_llm()

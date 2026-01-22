@@ -10,13 +10,17 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pika
 import pytest
 import torch
 from google.cloud import firestore, storage
-from google.cloud import pubsub_v1
 
 from starlette.testclient import TestClient as StarletteTestClient
 
+from codie_as_a_service.adapters.messaging.rabbitmq_adapter import (
+    RabbitMQPublisher,
+    RabbitMQSubscriber,
+)
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
 from codie_as_a_service.core.models import RunAgentRequest, AgentResponse
 from codie_as_a_service.services.memory.memory_service import MemoryService
@@ -55,13 +59,13 @@ class LLMResponseSpec:
 # Test configuration
 PROJECT_ID = "test-project"
 GCS_BUCKET_NAME = "test-deep-agent-memory"
-PUBSUB_EMULATOR_PORT = 8085
+RABBITMQ_PORT = 5672
 FIRESTORE_EMULATOR_PORT = 8086
 GCS_EMULATOR_PORT = 4443
-REQUEST_TOPIC_PATH = f"projects/{PROJECT_ID}/topics/agent-requests"
-RESPONSE_TOPIC_PATH = f"projects/{PROJECT_ID}/topics/agent-responses"
-REQUEST_SUBSCRIPTION_PATH = f"projects/{PROJECT_ID}/subscriptions/agent-requests-sub"
-RESPONSE_SUBSCRIPTION_PATH = f"projects/{PROJECT_ID}/subscriptions/agent-responses-sub"
+# Domain-level messaging constants (adapter translates to implementation)
+REQUEST_SUBSCRIPTION = "agent.requests"
+RESPONSE_SUBSCRIPTION = "agent.responses"
+RESPONSE_TOPIC = "agent.responses"
 
 
 # ============================================================================
@@ -70,39 +74,34 @@ RESPONSE_SUBSCRIPTION_PATH = f"projects/{PROJECT_ID}/subscriptions/agent-respons
 
 
 @pytest.fixture(scope="session")
-def pubsub_emulator():
-    """Start Pub/Sub emulator Docker container for test session."""
+def rabbitmq_broker():
+    """Start RabbitMQ Docker container for test session."""
     # Clean up any existing container
-    subprocess.run(["docker", "rm", "-f", "pubsub-emulator-test"], capture_output=True)
+    subprocess.run(["docker", "rm", "-f", "rabbitmq-test"], capture_output=True)
 
-    # Start emulator
+    # Start RabbitMQ
     subprocess.run(
         [
             "docker",
             "run",
             "-d",
             "--name",
-            "pubsub-emulator-test",
+            "rabbitmq-test",
             "-p",
-            f"{PUBSUB_EMULATOR_PORT}:8085",
-            "google/cloud-sdk:emulators",
-            "/bin/bash",
-            "-c",
-            f"gcloud beta emulators pubsub start --project={PROJECT_ID} --host-port=0.0.0.0:8085",
+            f"{RABBITMQ_PORT}:5672",
+            "rabbitmq:3-management",
         ],
         check=True,
         capture_output=True,
     )
 
-    os.environ["PUBSUB_EMULATOR_HOST"] = f"localhost:{PUBSUB_EMULATOR_PORT}"
-    time.sleep(5)  # Wait for emulator to be ready
+    time.sleep(10)  # Wait for RabbitMQ to be ready
 
     yield
 
     # Cleanup
-    subprocess.run(["docker", "stop", "pubsub-emulator-test"], capture_output=True)
-    subprocess.run(["docker", "rm", "pubsub-emulator-test"], capture_output=True)
-    os.environ.pop("PUBSUB_EMULATOR_HOST", None)
+    subprocess.run(["docker", "stop", "rabbitmq-test"], capture_output=True)
+    subprocess.run(["docker", "rm", "rabbitmq-test"], capture_output=True)
 
 
 @pytest.fixture(scope="session")
@@ -186,15 +185,23 @@ def gcs_emulator():
 
 
 @pytest.fixture(scope="session")
-def pubsub_publisher(pubsub_emulator) -> pubsub_v1.PublisherClient:
-    """Provide Pub/Sub publisher client connected to emulator."""
-    return pubsub_v1.PublisherClient()
+def rabbitmq_connection(rabbitmq_broker) -> pika.BlockingConnection:
+    """Provide RabbitMQ connection."""
+    return pika.BlockingConnection(
+        pika.ConnectionParameters(host="localhost", port=RABBITMQ_PORT)
+    )
 
 
 @pytest.fixture(scope="session")
-def pubsub_subscriber(pubsub_emulator) -> pubsub_v1.SubscriberClient:
-    """Provide Pub/Sub subscriber client connected to emulator."""
-    return pubsub_v1.SubscriberClient()
+def rabbitmq_publisher(rabbitmq_connection) -> RabbitMQPublisher:
+    """Provide RabbitMQ publisher."""
+    return RabbitMQPublisher(rabbitmq_connection)
+
+
+@pytest.fixture(scope="session")
+def rabbitmq_subscriber(rabbitmq_connection) -> RabbitMQSubscriber:
+    """Provide RabbitMQ subscriber."""
+    return RabbitMQSubscriber(rabbitmq_connection)
 
 
 @pytest.fixture(scope="session")
@@ -219,16 +226,17 @@ def gcs_bucket(gcs_client) -> storage.Bucket:
 
 
 @pytest.fixture(scope="session")
-def pubsub_infrastructure(pubsub_publisher, pubsub_subscriber):
-    """Create Pub/Sub topics and subscriptions for tests."""
-    pubsub_publisher.create_topic(request={"name": REQUEST_TOPIC_PATH})
-    pubsub_publisher.create_topic(request={"name": RESPONSE_TOPIC_PATH})
-    pubsub_subscriber.create_subscription(
-        request={"name": REQUEST_SUBSCRIPTION_PATH, "topic": REQUEST_TOPIC_PATH}
-    )
-    pubsub_subscriber.create_subscription(
-        request={"name": RESPONSE_SUBSCRIPTION_PATH, "topic": RESPONSE_TOPIC_PATH}
-    )
+def rabbitmq_infrastructure(rabbitmq_connection):
+    """Create messaging infrastructure for tests."""
+    channel = rabbitmq_connection.channel()
+
+    # Declare request subscription endpoint
+    channel.queue_declare(queue=REQUEST_SUBSCRIPTION, durable=True)
+
+    # Declare response topic endpoint
+    channel.exchange_declare(exchange=RESPONSE_TOPIC, exchange_type="fanout", durable=True)
+    channel.queue_declare(queue=RESPONSE_SUBSCRIPTION, durable=True)
+    channel.queue_bind(queue=RESPONSE_SUBSCRIPTION, exchange=RESPONSE_TOPIC)
 
 
 @pytest.fixture(scope="session")
@@ -242,21 +250,21 @@ def agent_app(
     memory_service,
     llm_adapter,
     file_prompt_adapter,
-    pubsub_publisher,
-    pubsub_subscriber,
-    pubsub_infrastructure,
+    rabbitmq_publisher,
+    rabbitmq_subscriber,
+    rabbitmq_infrastructure,
 ):
     """Start the agent app for E2E tests."""
-    # GCP SubscriberClient directly implements PubSubSubscriber protocol (duck typing)
+    # Adapters implement synapse protocols
     app = create_app(
         memory_service=memory_service,
         llm_adapter=llm_adapter,
         prompt_adapter=file_prompt_adapter,
         prompt_names=["codie_as_a_service_system"],
-        publisher=pubsub_publisher,
-        subscriber=pubsub_subscriber,
-        request_subscription_path=REQUEST_SUBSCRIPTION_PATH,
-        response_topic_path=RESPONSE_TOPIC_PATH,
+        publisher=rabbitmq_publisher,
+        subscriber=rabbitmq_subscriber,
+        request_subscription_path=REQUEST_SUBSCRIPTION,
+        response_topic_path=RESPONSE_TOPIC,
     )
     app.start()
     yield app
@@ -272,12 +280,13 @@ class TestClient:
     """Client for E2E tests - simulates external client interacting with the system."""
 
     def __init__(
-        self, publisher, subscriber, request_topic_path, response_subscription_path
+        self, publisher: RabbitMQPublisher, subscriber: RabbitMQSubscriber,
+        request_subscription: str, response_subscription: str
     ):
         self._publisher = publisher
         self._subscriber = subscriber
-        self._request_topic_path = request_topic_path
-        self._response_subscription_path = response_subscription_path
+        self._request_subscription = request_subscription
+        self._response_subscription = response_subscription
 
     def send_request(
         self,
@@ -288,15 +297,15 @@ class TestClient:
         timeout_seconds: int = 10,
     ):
         """Publish request and wait for response."""
-        # Publish request
         request = RunAgentRequest(
             user_id=user_id,
             session_id=session_id,
             message=message,
             output_format=output_format,
         )
+        # Publish to request topic
         self._publisher.publish(
-            self._request_topic_path, request.model_dump_json().encode("utf-8")
+            f":{self._request_subscription}", request.model_dump_json().encode("utf-8")
         ).result()
 
         # Wait for response
@@ -304,7 +313,7 @@ class TestClient:
         while time.time() < deadline:
             pull_response = self._subscriber.pull(
                 request={
-                    "subscription": self._response_subscription_path,
+                    "subscription": self._response_subscription,
                     "max_messages": 1,
                 },
                 timeout=1,
@@ -313,7 +322,7 @@ class TestClient:
                 msg = pull_response.received_messages[0]
                 self._subscriber.acknowledge(
                     request={
-                        "subscription": self._response_subscription_path,
+                        "subscription": self._response_subscription,
                         "ack_ids": [msg.ack_id],
                     }
                 )
@@ -325,13 +334,17 @@ class TestClient:
 
 
 @pytest.fixture(scope="session")
-def test_client(pubsub_infrastructure):
+def test_client(rabbitmq_connection, rabbitmq_infrastructure):
     """Provide a test client with its own publisher/subscriber."""
+    # Create separate connection for test client to avoid channel conflicts
+    client_connection = pika.BlockingConnection(
+        pika.ConnectionParameters(host="localhost", port=RABBITMQ_PORT)
+    )
     return TestClient(
-        publisher=pubsub_v1.PublisherClient(),
-        subscriber=pubsub_v1.SubscriberClient(),
-        request_topic_path=REQUEST_TOPIC_PATH,
-        response_subscription_path=RESPONSE_SUBSCRIPTION_PATH,
+        publisher=RabbitMQPublisher(client_connection),
+        subscriber=RabbitMQSubscriber(client_connection),
+        request_subscription=REQUEST_SUBSCRIPTION,
+        response_subscription=RESPONSE_SUBSCRIPTION,
     )
 
 
@@ -575,6 +588,7 @@ class TestApp:
         """Reset LLM mock to default state."""
         self._llm_adapter._tokenizer.decode.side_effect = None
         self._llm_adapter._tokenizer.decode.return_value = self._default_response
+        self._llm_adapter._model.generate.side_effect = None
 
     def chat(
         self,

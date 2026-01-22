@@ -234,7 +234,9 @@ def rabbitmq_infrastructure(rabbitmq_connection):
     channel.queue_declare(queue=REQUEST_SUBSCRIPTION, durable=True)
 
     # Declare response topic endpoint
-    channel.exchange_declare(exchange=RESPONSE_TOPIC, exchange_type="fanout", durable=True)
+    channel.exchange_declare(
+        exchange=RESPONSE_TOPIC, exchange_type="fanout", durable=True
+    )
     channel.queue_declare(queue=RESPONSE_SUBSCRIPTION, durable=True)
     channel.queue_bind(queue=RESPONSE_SUBSCRIPTION, exchange=RESPONSE_TOPIC)
 
@@ -280,8 +282,11 @@ class TestClient:
     """Client for E2E tests - simulates external client interacting with the system."""
 
     def __init__(
-        self, publisher: RabbitMQPublisher, subscriber: RabbitMQSubscriber,
-        request_subscription: str, response_subscription: str
+        self,
+        publisher: RabbitMQPublisher,
+        subscriber: RabbitMQSubscriber,
+        request_subscription: str,
+        response_subscription: str,
     ):
         self._publisher = publisher
         self._subscriber = subscriber

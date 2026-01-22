@@ -96,7 +96,7 @@ codie_as_a_service/
 ```bash
 # Clone repository
 git clone https://github.com/IzzyFuller/codie_as_a_service.git
-cd codie-as-a-service
+cd codie_as_a_service
 
 # Install all dependencies (main + dev + demo)
 uv sync

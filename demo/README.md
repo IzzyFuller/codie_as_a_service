@@ -63,10 +63,10 @@ OPENROUTER_MODEL=anthropic/claude-sonnet-4-20250514
 LANGFUSE_PUBLIC_KEY=your-public-key
 LANGFUSE_SECRET_KEY=your-secret-key
 LANGFUSE_HOST=https://cloud.langfuse.com
-LANGFUSE_PROMPT_LABEL=deep_agent_service
+LANGFUSE_PROMPT_LABEL=codie_as_a_service
 
 # Required - Prompt configuration
-PROMPT_NAMES=deep_agent_service_system
+PROMPT_NAMES=codie_as_a_service_system
 
 # Optional - Override defaults
 HTTP_HOST=0.0.0.0

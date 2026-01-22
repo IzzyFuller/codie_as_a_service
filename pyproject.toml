@@ -1,5 +1,5 @@
 [project]
-name = "deep-agent-service"
+name = "codie-as-a-service"
 version = "0.1.0"
 description = "Microservice for per-user agent identity and memory"
 authors = [
@@ -51,7 +51,7 @@ omit = [
 [tool.mypy]
 ignore_missing_imports = true
 mypy_path = "src"
-packages = ["deep_agent_service"]
+packages = ["codie_as_a_service"]
 explicit_package_bases = true
 # Relaxed for now - tighten as codebase matures
 disable_error_code = ["attr-defined", "arg-type", "call-arg"]

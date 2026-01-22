@@ -11,7 +11,7 @@ from typing import Any
 
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from deep_agent_service.core.models import (
+from codie_as_a_service.core.models import (
     ContentBlock,
     LLMResponse,
     Message,

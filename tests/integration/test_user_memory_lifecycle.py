@@ -10,8 +10,8 @@ ATDD Acceptance Criteria:
 
 import pytest
 
-from deep_agent_service.services.memory.memory_service import MemoryService
-from deep_agent_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
+from codie_as_a_service.services.memory.memory_service import MemoryService
+from codie_as_a_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
 
 
 @pytest.mark.integration

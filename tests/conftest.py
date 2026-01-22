@@ -17,12 +17,12 @@ from google.cloud import pubsub_v1
 
 from starlette.testclient import TestClient as StarletteTestClient
 
-from deep_agent_service.adapters.prompts.file_adapter import FilePromptAdapter
-from deep_agent_service.core.models import RunAgentRequest, AgentResponse
-from deep_agent_service.services.memory.memory_service import MemoryService
-from deep_agent_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
-from deep_agent_service.main_pubsub import create_app
-from deep_agent_service.main_http import create_app as create_http_app
+from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
+from codie_as_a_service.core.models import RunAgentRequest, AgentResponse
+from codie_as_a_service.services.memory.memory_service import MemoryService
+from codie_as_a_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
+from codie_as_a_service.main_pubsub import create_app
+from codie_as_a_service.main_http import create_app as create_http_app
 
 # ============================================================================
 # Domain-Level Test Response Specs (Adapter-Agnostic)
@@ -252,7 +252,7 @@ def agent_app(
         memory_service=memory_service,
         llm_adapter=llm_adapter,
         prompt_adapter=file_prompt_adapter,
-        prompt_names=["deep_agent_service_system"],
+        prompt_names=["codie_as_a_service_system"],
         publisher=pubsub_publisher,
         subscriber=pubsub_subscriber,
         request_subscription_path=REQUEST_SUBSCRIPTION_PATH,
@@ -347,7 +347,7 @@ def llm_adapter():
     Used internally by TestApp. Tests should not use this fixture directly -
     use test_app.stub_llm_responses() instead.
     """
-    from deep_agent_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
+    from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 
     # Create mock tokenizer and model
     mock_tokenizer = MagicMock()
@@ -368,10 +368,10 @@ def llm_adapter():
     # Create adapter without loading real model
     with (
         patch(
-            "deep_agent_service.adapters.llm.local_llm_adapter.AutoTokenizer"
+            "codie_as_a_service.adapters.llm.local_llm_adapter.AutoTokenizer"
         ) as mock_auto_tok,
         patch(
-            "deep_agent_service.adapters.llm.local_llm_adapter.AutoModelForCausalLM"
+            "codie_as_a_service.adapters.llm.local_llm_adapter.AutoModelForCausalLM"
         ) as mock_auto_model,
     ):
         mock_auto_tok.from_pretrained.return_value = mock_tokenizer
@@ -392,7 +392,7 @@ def file_prompt_adapter():
     # Define test prompts - using variables that ReActAgent actually passes
     # (me, context_anchors, current_session)
     test_prompts = {
-        "deep_agent_service_system.txt": (
+        "codie_as_a_service_system.txt": (
             "You are a helpful AI assistant with access to user memory. "
             "Identity: {me}. Context: {context_anchors}. Session: {current_session}. "
             "You can read and write to the user's memory using the provided tools."
@@ -461,7 +461,7 @@ def http_app(
         memory_service=memory_service,
         llm_adapter=llm_adapter,
         prompt_adapter=file_prompt_adapter,
-        prompt_names=["deep_agent_service_system"],
+        prompt_names=["codie_as_a_service_system"],
     )
     return app
 

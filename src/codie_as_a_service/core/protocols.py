@@ -2,7 +2,7 @@
 
 from typing import Optional, Protocol, runtime_checkable
 
-from deep_agent_service.core.models import (
+from codie_as_a_service.core.models import (
     LLMResponse,
     Message,
     ToolDefinition,

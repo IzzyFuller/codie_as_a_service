@@ -67,7 +67,7 @@ uv sync --group demo --quiet
 # Start the HTTP service in background
 # UV_NO_SYNC=1 prevents uv bug where torch is reinstalled on every run (macOS 26 platform tag mismatch)
 echo "Starting HTTP service..."
-UV_NO_SYNC=1 uv run python -m deep_agent_service.main_http &
+UV_NO_SYNC=1 uv run python -m codie_as_a_service.main_http &
 HTTP_PID=$!
 
 # Wait for HTTP service to be ready (model loading + app init can take 2+ minutes)

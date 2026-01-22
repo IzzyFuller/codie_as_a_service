@@ -1,6 +1,6 @@
-# Deep Agent Service
+# Codie-as-a-Service
 
-![CI](https://github.com/IzzyFuller/deep_agent_service/workflows/CI/badge.svg)
+![CI](https://github.com/IzzyFuller/codie_as_a_service/workflows/CI/badge.svg)
 [![Coverage](https://img.shields.io/endpoint?url=https://gist.githubusercontent.com/IzzyFuller/100b39151bc1c8397fb6a684ade5e588/raw/coverage.json)](https://gist.github.com/IzzyFuller/100b39151bc1c8397fb6a684ade5e588)
 ![Python](https://img.shields.io/badge/python-3.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
@@ -16,8 +16,8 @@ This service extracts deep agent functionality from python-monorepo and preproce
 ### Hexagonal Architecture (Ports & Adapters)
 
 ```
-deep_agent_service/
-├── src/deep_agent_service/
+codie_as_a_service/
+├── src/codie_as_a_service/
 │   ├── core/                  # Domain layer (models, protocols)
 │   ├── services/              # Business logic layer
 │   │   ├── agent/            # ReAct agent implementation
@@ -95,8 +95,8 @@ deep_agent_service/
 
 ```bash
 # Clone repository
-git clone https://github.com/IzzyFuller/deep_agent_service.git
-cd deep-agent-service
+git clone https://github.com/IzzyFuller/codie_as_a_service.git
+cd codie-as-a-service
 
 # Install all dependencies (main + dev + demo)
 uv sync
@@ -193,7 +193,7 @@ python scripts/sync-memory-from-gcs.py izzy
 
 ```bash
 # Run all tests with coverage
-uv run pytest --cov=src/deep_agent_service --cov-report=term-missing
+uv run pytest --cov=src/codie_as_a_service --cov-report=term-missing
 
 # Run specific test file
 uv run pytest tests/services/agent/test_react_agent.py

@@ -5,10 +5,10 @@ Implements MessageHandler protocol from synapse.
 
 from synapse.protocols.publisher import PubSubPublisher
 
-from deep_agent_service.core.models import RunAgentRequest, AgentResponse
-from deep_agent_service.core.protocols import LLMProtocol, PromptProtocol
-from deep_agent_service.services.memory.memory_service import MemoryService
-from deep_agent_service.services.agent.react_agent import ReActAgent
+from codie_as_a_service.core.models import RunAgentRequest, AgentResponse
+from codie_as_a_service.core.protocols import LLMProtocol, PromptProtocol
+from codie_as_a_service.services.memory.memory_service import MemoryService
+from codie_as_a_service.services.agent.react_agent import ReActAgent
 
 
 class AgentMessageHandler:

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Start deep_agent_service locally with GCS emulator
+# Start codie_as_a_service locally with GCS emulator
 #
 # Prerequisites:
 #   - Docker installed and running
@@ -77,4 +77,4 @@ echo "HTTP Port: $HTTP_PORT"
 echo ""
 
 # Run the server
-python -m deep_agent_service.main_http
+python -m codie_as_a_service.main_http

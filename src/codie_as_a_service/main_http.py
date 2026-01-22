@@ -10,12 +10,12 @@ from fastapi.responses import StreamingResponse
 from google.cloud import storage
 from pydantic import BaseModel
 
-from deep_agent_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
-from deep_agent_service.adapters.prompts.file_adapter import FilePromptAdapter
-from deep_agent_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
-from deep_agent_service.core.protocols import LLMProtocol, PromptProtocol
-from deep_agent_service.services.agent.react_agent import ReActAgent
-from deep_agent_service.services.memory.memory_service import MemoryService
+from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
+from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
+from codie_as_a_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
+from codie_as_a_service.core.protocols import LLMProtocol, PromptProtocol
+from codie_as_a_service.services.agent.react_agent import ReActAgent
+from codie_as_a_service.services.memory.memory_service import MemoryService
 
 
 class ChatRequest(BaseModel):

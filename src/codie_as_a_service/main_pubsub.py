@@ -11,9 +11,9 @@ from synapse.consumer.message_consumer import MessageConsumer
 from synapse.protocols.publisher import PubSubPublisher
 from synapse.protocols.subscriber import PubSubSubscriber
 
-from deep_agent_service.adapters.messaging.pubsub_handler import AgentMessageHandler
-from deep_agent_service.core.models import RunAgentRequest
-from deep_agent_service.core.protocols import MemoryProtocol
+from codie_as_a_service.adapters.messaging.pubsub_handler import AgentMessageHandler
+from codie_as_a_service.core.models import RunAgentRequest
+from codie_as_a_service.core.protocols import MemoryProtocol
 
 
 class AgentApp:
@@ -98,10 +98,10 @@ def main() -> None:
     # Lazy imports for production dependencies
     from google.cloud import pubsub_v1, storage
 
-    from deep_agent_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
-    from deep_agent_service.adapters.prompts.file_adapter import FilePromptAdapter
-    from deep_agent_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
-    from deep_agent_service.services.memory.memory_service import MemoryService
+    from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
+    from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
+    from codie_as_a_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
+    from codie_as_a_service.services.memory.memory_service import MemoryService
 
     # Configuration from environment
     gcs_bucket_name = os.environ.get("GCS_BUCKET_NAME")

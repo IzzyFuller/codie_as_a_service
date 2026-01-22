@@ -14,7 +14,7 @@ import uuid
 
 from google.cloud import pubsub_v1
 
-from deep_agent_service.core.models import RunAgentRequest, AgentResponse
+from codie_as_a_service.core.models import RunAgentRequest, AgentResponse
 
 
 # Configuration from environment

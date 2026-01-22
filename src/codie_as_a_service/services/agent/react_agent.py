@@ -4,7 +4,7 @@ import json
 import logging
 from typing import Any
 
-from deep_agent_service.core.models import (
+from codie_as_a_service.core.models import (
     ContentBlock,
     DEFAULT_OUTPUT_FORMAT,
     LLMResponse,
@@ -12,11 +12,11 @@ from deep_agent_service.core.models import (
     ToolDefinition,
     ToolUseBlock,
 )
-from deep_agent_service.core.protocols import (
+from codie_as_a_service.core.protocols import (
     LLMProtocol,
     PromptProtocol,
 )
-from deep_agent_service.services.memory.memory_service import MemoryService
+from codie_as_a_service.services.memory.memory_service import MemoryService
 
 logger = logging.getLogger(__name__)
 

@@ -16,7 +16,12 @@ from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
 from codie_as_a_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
 from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
-from codie_as_a_service.core.protocols import AuthProtocol, LLMProtocol, PromptProtocol
+from codie_as_a_service.core.protocols import (
+    AuthProtocol,
+    LLMProtocol,
+    MemoryProtocol,
+    PromptProtocol,
+)
 from codie_as_a_service.services.agent.react_agent import ReActAgent
 from codie_as_a_service.services.memory.memory_service import MemoryService
 
@@ -152,7 +157,7 @@ def main() -> None:
             raise ValueError("GCS_BUCKET_NAME required when STORAGE_ADAPTER=gcs")
         gcs_client = storage.Client()
         bucket = gcs_client.bucket(gcs_bucket_name)
-        storage_adapter = GCSMemoryAdapter(bucket=bucket)
+        storage_adapter: MemoryProtocol = GCSMemoryAdapter(bucket=bucket)
     elif storage_adapter_type == "local":
         storage_dir = os.environ.get("STORAGE_DIR")
         if not storage_dir:

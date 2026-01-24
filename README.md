@@ -25,9 +25,9 @@ codie_as_a_service/
 │   │   └── tools/            # Agent tool system
 │   ├── adapters/             # Infrastructure layer
 │   │   ├── auth/             # Authentication adapters
-│   │   ├── llm/              # Local LLM adapter (Transformers)
+│   │   ├── llm/              # LLM adapters (Claude CLI, Local Transformers)
 │   │   ├── prompts/          # File-based prompt templates
-│   │   ├── storage/          # GCS adapter
+│   │   ├── storage/          # Storage adapters (Local, GCS)
 │   │   └── messaging/        # RabbitMQ adapter
 │   └── api/                  # Entry points
 └── tests/                    # Mirror structure for tests
@@ -43,12 +43,17 @@ codie_as_a_service/
 
 ### Core Dependencies
 - **Python**: 3.13.x
-- **Transformers**: Native HuggingFace model loading (supports local models like SmolLM3)
 - **FastAPI**: HTTP API with streaming SSE responses
-- **Google Cloud Storage**: User memory file storage
 - **Pydantic**: Type-safe models throughout
 - **pika**: RabbitMQ client for pub/sub messaging
-- **synapse**: Stack-agnostic pub/sub protocols
+
+### LLM Adapters
+- **Claude CLI**: Uses Claude Code CLI (`claude -p`) - recommended for local dev
+- **Transformers**: Native HuggingFace model loading (supports local models like SmolLM3)
+
+### Storage Adapters
+- **Local**: Filesystem storage - no cloud dependencies
+- **Google Cloud Storage**: Production-ready cloud storage
 
 ### Dev Dependencies
 - **pytest**: Testing framework with coverage and async support
@@ -89,7 +94,8 @@ codie_as_a_service/
 
 - **Python 3.13.x** - Required (strict version constraint)
 - **uv** - Package manager ([install guide](https://docs.astral.sh/uv/getting-started/installation/))
-- **Docker** - For running GCS emulator and RabbitMQ
+- **Claude Code CLI** - For `claude_cli` LLM adapter ([install guide](https://docs.anthropic.com/en/docs/claude-code))
+- **Docker** - Only needed for running tests or GCS emulator mode
 
 ### Installation
 
@@ -117,19 +123,74 @@ MODEL_NAME=HuggingFaceTB/SmolLM3-3B  # Or any HuggingFace model
 DEVICE=mps                          # mps (Apple Silicon), cuda, or cpu
 ```
 
-## Running the Demo
+## Running Locally
 
-### Quick Start
+The easiest way to run codie-as-a-service locally without Docker or cloud dependencies.
+
+### Quick Start (Local Mode)
+
+```bash
+# 1. Copy and configure environment
+cp .env.example .env
+# Edit .env - defaults work for local mode
+
+# 2. Start the HTTP server with local storage + Claude CLI
+./scripts/start-local-http.sh
+
+# 3. Optionally create a user on startup
+./scripts/start-local-http.sh myuser
+```
+
+This starts the service with:
+- **Storage**: Local filesystem (`./data/users/`)
+- **LLM**: Claude Code CLI (uses your installed `claude` command)
+- **API**: http://localhost:8080
+
+### Test the API
+
+```bash
+curl -X POST http://localhost:8080/chat \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: local-dev-key" \
+  -d '{"user_id": "test", "session_id": "1", "message": "Hello!"}' \
+  --no-buffer
+```
+
+### Running with Gradio UI
+
+```bash
+# Start HTTP server in one terminal
+./scripts/start-local-http.sh
+
+# Start Gradio UI in another terminal
+uv run --group demo python demo/app.py
+# Opens at http://localhost:7860
+```
+
+### Configuration Options
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STORAGE_ADAPTER` | `gcs` | `local` or `gcs` |
+| `STORAGE_DIR` | `./data/users` | Path for local storage |
+| `LLM_ADAPTER` | `claude_cli` | `claude_cli` or `local` |
+| `MODEL_NAME` | - | HuggingFace model (when `LLM_ADAPTER=local`) |
+| `DEVICE` | `mps` | `mps`, `cuda`, or `cpu` (when `LLM_ADAPTER=local`) |
+| `API_KEY` | - | API key for authentication |
+
+See `.env.example` for all options.
+
+## Running with Emulators
+
+For testing with GCS emulator (matches production infrastructure):
+
+### Quick Start (Emulator Mode)
 
 ```bash
 # 1. Start emulators and create demo user
 ./demo/setup-infrastructure.sh
 
 # 2. Run the HTTP streaming demo with Gradio UI
-
-# Install only main dependencies (no dev):
-uv sync --no-dev
-
 ./demo/run-http-demo.sh
 # Opens at http://localhost:7860
 
@@ -257,7 +318,7 @@ gs://deep-agent-memory-{env}/
 - ReAct agent with tool calling (read/write memory)
 - HTTP streaming API with API key authentication
 - RabbitMQ pub/sub messaging
-- 21 tests with 100% coverage
+- 50 tests with 100% coverage
 
 ## Contributing
 

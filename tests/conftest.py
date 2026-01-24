@@ -17,10 +17,7 @@ from google.cloud import firestore, storage
 
 from starlette.testclient import TestClient as StarletteTestClient
 
-from codie_as_a_service.adapters.messaging.rabbitmq_adapter import (
-    RabbitMQPublisher,
-    RabbitMQSubscriber,
-)
+from synapse.adapters.rabbitmq import RabbitMQPublisher, RabbitMQSubscriber
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
 from codie_as_a_service.core.models import RunAgentRequest, AgentResponse
 from codie_as_a_service.services.memory.memory_service import MemoryService

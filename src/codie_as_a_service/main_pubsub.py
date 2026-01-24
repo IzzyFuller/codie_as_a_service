@@ -16,10 +16,7 @@ from synapse.protocols.subscriber import PubSubSubscriber
 from codie_as_a_service.adapters.llm.claude_cli_adapter import ClaudeCliAdapter
 from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 from codie_as_a_service.adapters.messaging.pubsub_handler import AgentMessageHandler
-from codie_as_a_service.adapters.messaging.rabbitmq_adapter import (
-    RabbitMQPublisher,
-    RabbitMQSubscriber,
-)
+from synapse.adapters.rabbitmq import RabbitMQPublisher, RabbitMQSubscriber
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
 from codie_as_a_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
 from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter

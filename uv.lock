@@ -1515,8 +1515,9 @@ wheels = [
 [[package]]
 name = "synapse"
 version = "0.1.0"
-source = { git = "https://github.com/IzzyFuller/synapse.git?rev=main#80f40973751fc7f02d48ea3b9aeff8a1b1f31354" }
+source = { git = "https://github.com/IzzyFuller/synapse.git?rev=main#414de70d4588d0dd69f7feaa5c2ef8089182b750" }
 dependencies = [
+    { name = "pika" },
     { name = "pydantic" },
 ]
 

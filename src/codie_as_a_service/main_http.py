@@ -11,6 +11,7 @@ from google.cloud import storage
 from pydantic import BaseModel
 
 from codie_as_a_service.adapters.auth.api_key_adapter import APIKeyAuthAdapter
+from codie_as_a_service.adapters.llm.claude_cli_adapter import ClaudeCliAdapter
 from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
 from codie_as_a_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
@@ -130,11 +131,7 @@ def main() -> None:
         raise ValueError("HTTP_PORT environment variable is required")
     port = int(port_str)
 
-    model_name = os.environ.get("MODEL_NAME")
-    if not model_name:
-        raise ValueError("MODEL_NAME environment variable is required")
-
-    device = os.environ.get("DEVICE", "mps")  # Default to Apple Silicon
+    llm_adapter_type = os.environ.get("LLM_ADAPTER", "claude_cli")
 
     prompts_dir = os.environ.get("PROMPTS_DIR")
     if not prompts_dir:
@@ -153,8 +150,18 @@ def main() -> None:
     gcs_client = storage.Client()
     bucket = gcs_client.bucket(gcs_bucket_name)
 
-    # Initialize adapters
-    llm_adapter = LocalLLMAdapter(model_name=model_name, device=device)
+    # Initialize LLM adapter based on type
+    if llm_adapter_type == "claude_cli":
+        llm_adapter: LLMProtocol = ClaudeCliAdapter()
+    elif llm_adapter_type == "local":
+        model_name = os.environ.get("MODEL_NAME")
+        if not model_name:
+            raise ValueError("MODEL_NAME required when LLM_ADAPTER=local")
+        device = os.environ.get("DEVICE", "mps")
+        llm_adapter = LocalLLMAdapter(model_name=model_name, device=device)
+    else:
+        raise ValueError(f"Unknown LLM_ADAPTER: {llm_adapter_type}")
+
     prompt_adapter = FilePromptAdapter(prompts_dir=prompts_dir)
 
     # Build memory service

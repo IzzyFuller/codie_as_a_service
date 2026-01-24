@@ -334,3 +334,61 @@ class TestE2EHTTPChat:
             api_key="wrong-key",
         )
         assert response.status_code == 401
+
+    def test_agent_lists_memory_keys_when_tool_is_used(self, test_app):
+        """
+        Given: User has multiple memory keys
+        When: Client sends request that triggers list_memory_keys tool
+        Then: Request completes (agent had access to key list)
+
+        This E2E test exercises list_memory_keys on the storage adapter.
+        """
+        user_id, session_id = test_app.setup_user()
+
+        # Pre-populate memory with multiple keys
+        test_app.write_memory(user_id, "current_session", "# Session")
+        test_app.write_memory(user_id, "notes", "# Notes")
+
+        # Configure LLM to use list_memory_keys tool
+        test_app.stub_llm_responses(
+            # Phase 1: ReAct loop - tool use
+            LLMResponseSpec(
+                stop_reason="tool_use",
+                content="Let me list your memory keys.",
+                tool_calls=[ToolCallSpec(name="list_memory_keys", arguments={})],
+            ),
+            # Phase 1: ReAct loop - final response
+            LLMResponseSpec(
+                stop_reason="end_turn", content="You have: current_session, notes"
+            ),
+            # Phase 2: Default structured output format
+            LLMResponseSpec(
+                stop_reason="end_turn",
+                content='{"response": "You have: current_session, notes"}',
+            ),
+        )
+
+        # Client sends request
+        events = test_app.chat(user_id, session_id, "What memory keys do I have?")
+
+        # Request completed successfully (tool execution worked)
+        done_events = [e for e in events if e["event"] == "done"]
+        assert len(done_events) == 1
+
+        test_app.reset_llm()
+
+
+def test_list_memory_keys_for_nonexistent_user(memory_service):
+    """
+    Integration test: list_memory_keys returns empty list for non-existent user.
+
+    This exercises the empty directory path in storage adapters (line 74).
+    Can't be tested via agent E2E because agent requires identity files.
+    """
+    import uuid
+
+    user_id = f"nonexistent_user_{uuid.uuid4().hex[:8]}"
+
+    keys = memory_service.list_memory_keys(user_id=user_id)
+
+    assert keys == []

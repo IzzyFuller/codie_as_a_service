@@ -224,6 +224,14 @@ class ReActAgent:
                     "required": ["key", "content"],
                 },
             ),
+            ToolDefinition(
+                name="list_memory_keys",
+                description="List all memory keys for the user",
+                input_schema={
+                    "type": "object",
+                    "properties": {},
+                },
+            ),
         ]
 
     def _execute_tools(
@@ -251,6 +259,10 @@ class ReActAgent:
             content = tool.input.get("content", "")
             self._memory.write_memory(user_id=user_id, key=key, content=content)
             return f"Successfully wrote to {key}"
+
+        elif tool.name == "list_memory_keys":
+            keys = self._memory.list_memory_keys(user_id=user_id)
+            return ", ".join(keys) if keys else "No memory keys found"
 
         # Tools are hardcoded in _get_tool_definitions() - LLM can only request those.
         # If we reach here, the LLM hallucinated a tool name (shouldn't happen).

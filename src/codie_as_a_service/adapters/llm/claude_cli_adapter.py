@@ -134,11 +134,11 @@ When you have a final answer and don't need any tools, respond with plain text.
             "",
             "--system-prompt",
             system_prompt,
-            prompt,
         ]
 
         result = subprocess.run(
             cmd,
+            input=prompt,
             capture_output=True,
             text=True,
             timeout=120,

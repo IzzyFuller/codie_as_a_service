@@ -25,6 +25,9 @@ from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
 from codie_as_a_service.core.models import RunAgentRequest, AgentResponse
 from codie_as_a_service.services.memory.memory_service import MemoryService
 from codie_as_a_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
+from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
+from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
+from codie_as_a_service.adapters.llm.claude_cli_adapter import ClaudeCliAdapter
 from codie_as_a_service.main_pubsub import create_app
 from codie_as_a_service.main_http import create_app as create_http_app
 
@@ -243,26 +246,172 @@ def rabbitmq_infrastructure(rabbitmq_connection):
     channel.queue_bind(queue=RESPONSE_SUBSCRIPTION, exchange=RESPONSE_TOPIC)
 
 
+# ============================================================================
+# Storage Adapter Parameterization (Class + Init Args Pattern)
+# ============================================================================
+
+
+@pytest.fixture(
+    scope="function",
+    params=[
+        pytest.param(
+            {
+                "class": LocalMemoryAdapter,
+                "kwargs_factory": lambda gcs_bucket, tmp_path: {
+                    "base_dir": str(tmp_path)
+                },
+            },
+            id="local",
+        ),
+        pytest.param(
+            {
+                "class": GCSMemoryAdapter,
+                "kwargs_factory": lambda gcs_bucket, tmp_path: {"bucket": gcs_bucket},
+            },
+            id="gcs",
+        ),
+    ],
+)
+def storage_adapter_config(request):
+    """Parameterized storage adapter configuration.
+
+    Returns dict with 'class' and 'kwargs_factory' for deferred instantiation.
+    """
+    return request.param
+
+
+@pytest.fixture(scope="function")
+def storage_adapter(storage_adapter_config, gcs_bucket, tmp_path):
+    """Instantiate storage adapter from parameterized config.
+
+    Function-scoped to ensure test isolation between parameter runs.
+    """
+    config = storage_adapter_config
+    kwargs = config["kwargs_factory"](gcs_bucket, tmp_path)
+    return config["class"](**kwargs)
+
+
+@pytest.fixture(scope="function")
+def memory_service(storage_adapter):
+    """Create memory service with parameterized storage adapter.
+
+    Function-scoped - each test gets fresh MemoryService instance.
+    Runs tests against both LocalMemoryAdapter and GCSMemoryAdapter
+    to maintain coverage on both implementations.
+    """
+    return MemoryService(storage=storage_adapter)
+
+
 @pytest.fixture(scope="session")
-def memory_service(gcs_bucket):
-    """Create memory service with GCS adapter."""
-    return MemoryService(storage=GCSMemoryAdapter(bucket=gcs_bucket))
+def pubsub_memory_service(gcs_bucket):
+    """Session-scoped memory service for pubsub tests.
+
+    Pubsub tests exercise the messaging layer, not storage adapters.
+    Uses LocalMemoryAdapter to avoid GCS emulator complexity.
+    HTTP tests handle parameterized storage adapter coverage.
+    """
+    temp_dir = tempfile.mkdtemp(prefix="pubsub_test_memory_")
+    return MemoryService(storage=LocalMemoryAdapter(base_dir=temp_dir))
+
+
+# ============================================================================
+# LLM Adapter Parameterization
+# ============================================================================
+
+
+def create_local_llm_adapter():
+    """Create LocalLLMAdapter with mocked model and tokenizer."""
+    mock_tokenizer = MagicMock()
+    mock_model = MagicMock()
+
+    mock_tokenizer.apply_chat_template.return_value = {
+        "input_ids": torch.tensor([[1, 2, 3]]),
+        "attention_mask": torch.tensor([[1, 1, 1]]),
+    }
+    mock_tokenizer.eos_token_id = 0
+    mock_tokenizer.decode.return_value = "I'm ready to help you."
+
+    mock_model.generate.return_value = torch.tensor([[1, 2, 3, 4, 5, 6]])
+    mock_model.to.return_value = mock_model
+
+    with (
+        patch(
+            "codie_as_a_service.adapters.llm.local_llm_adapter.AutoTokenizer"
+        ) as mock_auto_tok,
+        patch(
+            "codie_as_a_service.adapters.llm.local_llm_adapter.AutoModelForCausalLM"
+        ) as mock_auto_model,
+    ):
+        mock_auto_tok.from_pretrained.return_value = mock_tokenizer
+        mock_auto_model.from_pretrained.return_value = mock_model
+
+        adapter = LocalLLMAdapter(model_name="test-model", device="cpu")
+
+    return adapter
+
+
+def create_claude_cli_adapter():
+    """Create ClaudeCliAdapter with mocked _run_claude method."""
+    adapter = ClaudeCliAdapter()
+    # Mock _run_claude - will be configured by TestApp.stub_llm_responses
+    adapter._run_claude = MagicMock(return_value="I'm ready to help you.")
+    return adapter
+
+
+@pytest.fixture(
+    scope="function",
+    params=[
+        pytest.param("local", id="local"),
+        pytest.param("claude_cli", id="claude_cli"),
+    ],
+)
+def llm_adapter_type(request):
+    """Parameterized LLM adapter type."""
+    return request.param
+
+
+@pytest.fixture(scope="function")
+def llm_adapter(llm_adapter_type):
+    """Create LLM adapter based on parameterized type.
+
+    Function-scoped to ensure mock state isolation between tests.
+    """
+    if llm_adapter_type == "local":
+        return create_local_llm_adapter()
+    elif llm_adapter_type == "claude_cli":
+        return create_claude_cli_adapter()
+    else:
+        raise ValueError(f"Unknown LLM adapter type: {llm_adapter_type}")
+
+
+@pytest.fixture(scope="session")
+def pubsub_llm_adapter():
+    """Session-scoped LLM adapter for pubsub tests.
+
+    Separate from function-scoped llm_adapter to maintain session state.
+    Uses LocalLLMAdapter - pubsub tests exercise messaging, not LLM adapters.
+    """
+    return create_local_llm_adapter()
 
 
 @pytest.fixture(scope="session")
 def agent_app(
-    memory_service,
-    llm_adapter,
+    pubsub_memory_service,
+    pubsub_llm_adapter,
     file_prompt_adapter,
     rabbitmq_publisher,
     rabbitmq_subscriber,
     rabbitmq_infrastructure,
 ):
-    """Start the agent app for E2E tests."""
+    """Start the agent app for pubsub E2E tests.
+
+    Session-scoped to maintain RabbitMQ connection state.
+    Uses dedicated pubsub_memory_service (not parameterized).
+    """
     # Adapters implement synapse protocols
     app = create_app(
-        memory_service=memory_service,
-        llm_adapter=llm_adapter,
+        memory_service=pubsub_memory_service,
+        llm_adapter=pubsub_llm_adapter,
         prompt_adapter=file_prompt_adapter,
         prompt_names=["codie_as_a_service_system"],
         publisher=rabbitmq_publisher,
@@ -355,53 +504,6 @@ def test_client(rabbitmq_connection, rabbitmq_infrastructure):
     )
 
 
-# ============================================================================
-# LLM Adapter Fixtures (Internal - Used by TestApp)
-# ============================================================================
-
-
-@pytest.fixture(scope="session")
-def llm_adapter():
-    """LocalLLMAdapter with mocked model and tokenizer.
-
-    Used internally by TestApp. Tests should not use this fixture directly -
-    use test_app.stub_llm_responses() instead.
-    """
-    from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
-
-    # Create mock tokenizer and model
-    mock_tokenizer = MagicMock()
-    mock_model = MagicMock()
-
-    # Configure tokenizer - return dict with input_ids and attention_mask (return_dict=True)
-    mock_tokenizer.apply_chat_template.return_value = {
-        "input_ids": torch.tensor([[1, 2, 3]]),
-        "attention_mask": torch.tensor([[1, 1, 1]]),
-    }
-    mock_tokenizer.eos_token_id = 0
-    mock_tokenizer.decode.return_value = "I'm ready to help you."
-
-    # Configure model
-    mock_model.generate.return_value = torch.tensor([[1, 2, 3, 4, 5, 6]])
-    mock_model.to.return_value = mock_model
-
-    # Create adapter without loading real model
-    with (
-        patch(
-            "codie_as_a_service.adapters.llm.local_llm_adapter.AutoTokenizer"
-        ) as mock_auto_tok,
-        patch(
-            "codie_as_a_service.adapters.llm.local_llm_adapter.AutoModelForCausalLM"
-        ) as mock_auto_model,
-    ):
-        mock_auto_tok.from_pretrained.return_value = mock_tokenizer
-        mock_auto_model.from_pretrained.return_value = mock_model
-
-        adapter = LocalLLMAdapter(model_name="test-model", device="cpu")
-
-    return adapter
-
-
 @pytest.fixture(scope="session")
 def file_prompt_adapter():
     """Create FilePromptAdapter with test prompts in temporary directory."""
@@ -470,14 +572,17 @@ def sample_memory_content() -> str:
 # ============================================================================
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def http_app(
     memory_service,
     llm_adapter,
     file_prompt_adapter,
     api_key_auth_adapter,
 ):
-    """Create FastAPI HTTP app for E2E tests."""
+    """Create FastAPI HTTP app for E2E tests.
+
+    Function-scoped to ensure test isolation with parameterized storage.
+    """
     app = create_http_app(
         memory_service=memory_service,
         llm_adapter=llm_adapter,
@@ -577,6 +682,7 @@ class TestApp:
         self._llm_adapter = llm_adapter
         self._http_client = http_client
         self._pubsub_client = pubsub_client
+        self._is_claude_cli = isinstance(llm_adapter, ClaudeCliAdapter)
         self._default_response = self._to_adapter_response(
             LLMResponseSpec(stop_reason="end_turn", content="I'm ready to help you.")
         )
@@ -620,13 +726,24 @@ class TestApp:
                       to text that the adapter will parse.
         """
         adapter_responses = [self._to_adapter_response(r) for r in responses]
-        self._llm_adapter._tokenizer.decode.side_effect = adapter_responses
+        if self._is_claude_cli:
+            # ClaudeCliAdapter: mock _run_claude method
+            self._llm_adapter._run_claude.side_effect = adapter_responses
+        else:
+            # LocalLLMAdapter: mock tokenizer.decode
+            self._llm_adapter._tokenizer.decode.side_effect = adapter_responses
 
     def reset_llm(self) -> None:
         """Reset LLM mock to default state."""
-        self._llm_adapter._tokenizer.decode.side_effect = None
-        self._llm_adapter._tokenizer.decode.return_value = self._default_response
-        self._llm_adapter._model.generate.side_effect = None
+        if self._is_claude_cli:
+            # ClaudeCliAdapter: reset _run_claude mock
+            self._llm_adapter._run_claude.side_effect = None
+            self._llm_adapter._run_claude.return_value = self._default_response
+        else:
+            # LocalLLMAdapter: reset tokenizer and model mocks
+            self._llm_adapter._tokenizer.decode.side_effect = None
+            self._llm_adapter._tokenizer.decode.return_value = self._default_response
+            self._llm_adapter._model.generate.side_effect = None
 
     def chat(
         self,
@@ -706,25 +823,37 @@ class TestApp:
         Convert domain-level spec to text that the adapter will parse.
 
         This is the ONLY place that knows about adapter response format.
-        LocalLLMAdapter parses <tool_call> tags from text content.
+        - LocalLLMAdapter parses <tool_call> tags from text content.
+        - ClaudeCliAdapter parses {"tool_use": ...} JSON from text content.
         """
-        # Build content with tool calls as XML tags (SmolLM3 format)
         content_parts = []
         if spec.content:
             content_parts.append(spec.content)
 
-        for tc in spec.tool_calls:
-            tool_call_json = json.dumps({"name": tc.name, "arguments": tc.arguments})
-            content_parts.append(f"<tool_call>{tool_call_json}</tool_call>")
+        if self._is_claude_cli:
+            # ClaudeCliAdapter format: {"tool_use": {"name": "...", "arguments": {...}}}
+            for tc in spec.tool_calls:
+                tool_call_json = json.dumps(
+                    {"tool_use": {"name": tc.name, "arguments": tc.arguments}}
+                )
+                content_parts.append(tool_call_json)
+        else:
+            # LocalLLMAdapter format: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+            for tc in spec.tool_calls:
+                tool_call_json = json.dumps(
+                    {"name": tc.name, "arguments": tc.arguments}
+                )
+                content_parts.append(f"<tool_call>{tool_call_json}</tool_call>")
 
         return " ".join(content_parts) if content_parts else ""
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def test_app(memory_service, llm_adapter, http_app) -> TestApp:
     """
     Provide the encapsulated test application for HTTP tests.
 
+    Function-scoped to ensure test isolation with parameterized storage.
     This is the PRIMARY fixture HTTP tests should use. It hides all
     implementation details about adapters and wiring.
     """
@@ -737,20 +866,24 @@ def test_app(memory_service, llm_adapter, http_app) -> TestApp:
 
 
 @pytest.fixture(scope="session")
-def pubsub_test_app(memory_service, llm_adapter, agent_app, test_client) -> TestApp:
+def pubsub_test_app(
+    pubsub_memory_service, pubsub_llm_adapter, agent_app, test_client
+) -> TestApp:
     """
     Provide the encapsulated test application for Pub/Sub tests.
 
+    Session-scoped to maintain RabbitMQ connection state.
+    Uses dedicated pubsub fixtures (not parameterized).
     This is the PRIMARY fixture Pub/Sub tests should use.
     """
     return TestApp(
-        memory_service=memory_service,
-        llm_adapter=llm_adapter,
+        memory_service=pubsub_memory_service,
+        llm_adapter=pubsub_llm_adapter,
         pubsub_client=test_client,
     )
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def http_test_client(http_app):
     """Provide an HTTP test client for E2E tests."""
     return HTTPTestClient(http_app)

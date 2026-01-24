@@ -14,6 +14,7 @@ import httpx
 
 # Configuration
 API_BASE_URL = os.environ.get("DEEP_AGENT_API_URL", "http://localhost:8080")
+API_KEY = os.environ.get("API_KEY", "")
 DEFAULT_USER_ID = os.environ.get("DEMO_USER_ID", "demo-user")
 
 
@@ -40,9 +41,11 @@ def chat(message: str, history: list[dict], user_id: str):
     session_id = str(uuid.uuid4())
 
     with httpx.Client(timeout=120.0) as client:
+        headers = {"X-API-Key": API_KEY} if API_KEY else {}
         with client.stream(
             "POST",
             f"{API_BASE_URL}/chat",
+            headers=headers,
             json={
                 "user_id": user_id or DEFAULT_USER_ID,
                 "session_id": session_id,

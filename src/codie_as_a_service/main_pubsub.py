@@ -13,6 +13,7 @@ from synapse.consumer.message_consumer import MessageConsumer
 from synapse.protocols.publisher import PubSubPublisher
 from synapse.protocols.subscriber import PubSubSubscriber
 
+from codie_as_a_service.adapters.llm.claude_cli_adapter import ClaudeCliAdapter
 from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 from codie_as_a_service.adapters.messaging.pubsub_handler import AgentMessageHandler
 from codie_as_a_service.adapters.messaging.rabbitmq_adapter import (
@@ -21,6 +22,7 @@ from codie_as_a_service.adapters.messaging.rabbitmq_adapter import (
 )
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
 from codie_as_a_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
+from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
 from codie_as_a_service.core.models import RunAgentRequest
 from codie_as_a_service.core.protocols import MemoryProtocol
 from codie_as_a_service.services.memory.memory_service import MemoryService
@@ -106,15 +108,8 @@ def create_app(
 def main() -> None:
     """Start the message consumer."""
     # Configuration from environment
-    gcs_bucket_name = os.environ.get("GCS_BUCKET_NAME")
-    if not gcs_bucket_name:
-        raise ValueError("GCS_BUCKET_NAME environment variable is required")
-
-    model_name = os.environ.get("MODEL_NAME")
-    if not model_name:
-        raise ValueError("MODEL_NAME environment variable is required")
-
-    device = os.environ.get("DEVICE", "mps")  # Default to Apple Silicon
+    storage_adapter_type = os.environ.get("STORAGE_ADAPTER", "gcs")
+    llm_adapter_type = os.environ.get("LLM_ADAPTER", "claude_cli")
 
     prompts_dir = os.environ.get("PROMPTS_DIR")
     if not prompts_dir:
@@ -134,16 +129,38 @@ def main() -> None:
     publisher = RabbitMQPublisher(connection)
     subscriber = RabbitMQSubscriber(connection)
 
-    # Initialize GCS client for storage
-    gcs_client = storage.Client()
-    bucket = gcs_client.bucket(gcs_bucket_name)
+    # Initialize storage adapter based on type
+    if storage_adapter_type == "gcs":
+        gcs_bucket_name = os.environ.get("GCS_BUCKET_NAME")
+        if not gcs_bucket_name:
+            raise ValueError("GCS_BUCKET_NAME required when STORAGE_ADAPTER=gcs")
+        gcs_client = storage.Client()
+        bucket = gcs_client.bucket(gcs_bucket_name)
+        storage_adapter = GCSMemoryAdapter(bucket=bucket)
+    elif storage_adapter_type == "local":
+        storage_dir = os.environ.get("STORAGE_DIR")
+        if not storage_dir:
+            raise ValueError("STORAGE_DIR required when STORAGE_ADAPTER=local")
+        storage_adapter = LocalMemoryAdapter(base_dir=storage_dir)
+    else:
+        raise ValueError(f"Unknown STORAGE_ADAPTER: {storage_adapter_type}")
 
-    # Initialize adapters
-    llm_adapter = LocalLLMAdapter(model_name=model_name, device=device)
+    # Initialize LLM adapter based on type
+    if llm_adapter_type == "claude_cli":
+        llm_adapter = ClaudeCliAdapter()
+    elif llm_adapter_type == "local":
+        model_name = os.environ.get("MODEL_NAME")
+        if not model_name:
+            raise ValueError("MODEL_NAME required when LLM_ADAPTER=local")
+        device = os.environ.get("DEVICE", "mps")
+        llm_adapter = LocalLLMAdapter(model_name=model_name, device=device)
+    else:
+        raise ValueError(f"Unknown LLM_ADAPTER: {llm_adapter_type}")
+
     prompt_adapter = FilePromptAdapter(prompts_dir=prompts_dir)
 
     # Build memory service
-    memory_service = MemoryService(storage=GCSMemoryAdapter(bucket=bucket))
+    memory_service = MemoryService(storage=storage_adapter)
 
     # Create app
     app = create_app(

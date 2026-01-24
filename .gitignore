@@ -70,3 +70,6 @@ demo/demo.env
 *.tmp
 *.bak
 *.orig
+
+# Local storage data
+data/

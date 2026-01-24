@@ -11,26 +11,29 @@ set -e
 
 cd "$(dirname "$0")/.."
 
-# Check if infrastructure is set up
-if [ ! -f demo/demo.env ]; then
-    echo "ERROR: Infrastructure not set up. Run ./demo/setup-infrastructure.sh first"
-    exit 1
-fi
-
-# Check if GCS emulator is running
-if ! docker ps --format '{{.Names}}' | grep -q "^gcs-emulator-demo$"; then
-    echo "ERROR: GCS emulator not running. Run ./demo/setup-infrastructure.sh first"
-    exit 1
-fi
-
-# Load environment
-source demo/demo.env
-
-# Load .env for API keys
+# Load .env first
 if [ -f .env ]; then
     set -a
     source .env
     set +a
+fi
+
+# Check storage adapter - skip GCS checks if using local storage
+if [ "$STORAGE_ADAPTER" != "local" ]; then
+    # Check if infrastructure is set up
+    if [ ! -f demo/demo.env ]; then
+        echo "ERROR: Infrastructure not set up. Run ./demo/setup-infrastructure.sh first"
+        exit 1
+    fi
+
+    # Check if GCS emulator is running
+    if ! docker ps --format '{{.Names}}' | grep -q "^gcs-emulator-demo$"; then
+        echo "ERROR: GCS emulator not running. Run ./demo/setup-infrastructure.sh first"
+        exit 1
+    fi
+
+    # Load demo environment (GCS emulator settings)
+    source demo/demo.env
 fi
 
 # Configuration
@@ -52,10 +55,13 @@ echo "==========================================="
 echo "  Starting HTTP Demo with Gradio UI"
 echo "==========================================="
 echo ""
-echo "  GCS Emulator:   $STORAGE_EMULATOR_HOST"
+if [ "$STORAGE_ADAPTER" = "local" ]; then
+    echo "  Storage:        local ($STORAGE_DIR)"
+else
+    echo "  GCS Emulator:   $STORAGE_EMULATOR_HOST"
+fi
 echo "  HTTP API:       http://localhost:$HTTP_PORT"
 echo "  Demo UI:        http://localhost:$DEMO_PORT"
-echo "  User:           demo-user"
 echo ""
 echo "  Press Ctrl+C to stop"
 echo "==========================================="

@@ -145,10 +145,21 @@ When you have a final answer and don't need any tools, respond with plain text.
         )
 
         if result.returncode != 0:
-            raise RuntimeError(f"Claude CLI failed: {result.stderr}")
+            raise RuntimeError(
+                f"Claude CLI failed (exit {result.returncode}):\n"
+                f"stderr: {result.stderr[:500]}\n"
+                f"stdout: {result.stdout[:500]}"
+            )
 
         # Parse JSON response
-        response = json.loads(result.stdout)
+        try:
+            response = json.loads(result.stdout)
+        except json.JSONDecodeError as e:
+            raise RuntimeError(
+                f"Claude CLI returned invalid JSON: {e}\n"
+                f"stdout: {result.stdout[:500]!r}\n"
+                f"stderr: {result.stderr[:500]!r}"
+            )
 
         if response.get("is_error"):
             raise RuntimeError(

@@ -7,6 +7,10 @@ import os
 import signal
 import threading
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import pika
 from google.cloud import storage
 from synapse.consumer.message_consumer import MessageConsumer

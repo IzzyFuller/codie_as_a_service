@@ -4,6 +4,10 @@ import json
 import os
 from typing import Any, Generator
 
+from dotenv import load_dotenv
+
+load_dotenv()
+
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse

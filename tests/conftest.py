@@ -83,109 +83,137 @@ TEST_API_KEY = "test-secret-key-12345"
 # ============================================================================
 
 
+def _port_is_reachable(host: str, port: int) -> bool:
+    """Check if a TCP port is accepting connections."""
+    import socket
+
+    try:
+        with socket.create_connection((host, port), timeout=2):
+            return True
+    except OSError:
+        return False
+
+
 @pytest.fixture(scope="session")
 def rabbitmq_broker():
-    """Start RabbitMQ Docker container for test session."""
-    # Clean up any existing container
-    subprocess.run(["docker", "rm", "-f", "rabbitmq-test"], capture_output=True)
+    """Start RabbitMQ Docker container, or reuse existing service on port."""
+    started_container = False
 
-    # Start RabbitMQ
-    subprocess.run(
-        [
-            "docker",
-            "run",
-            "-d",
-            "--name",
-            "rabbitmq-test",
-            "-p",
-            f"{RABBITMQ_PORT}:5672",
-            "rabbitmq:3-management",
-        ],
-        check=True,
-        capture_output=True,
-    )
-
-    time.sleep(10)  # Wait for RabbitMQ to be ready
+    if not _port_is_reachable("localhost", RABBITMQ_PORT):
+        try:
+            subprocess.run(["docker", "rm", "-f", "rabbitmq-test"], capture_output=True)
+            subprocess.run(
+                [
+                    "docker",
+                    "run",
+                    "-d",
+                    "--name",
+                    "rabbitmq-test",
+                    "-p",
+                    f"{RABBITMQ_PORT}:5672",
+                    "rabbitmq:3-management",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            time.sleep(10)
+            started_container = True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pytest.skip(f"RabbitMQ not available on port {RABBITMQ_PORT}")
 
     yield
 
-    # Cleanup
-    subprocess.run(["docker", "stop", "rabbitmq-test"], capture_output=True)
-    subprocess.run(["docker", "rm", "rabbitmq-test"], capture_output=True)
+    if started_container:
+        subprocess.run(["docker", "stop", "rabbitmq-test"], capture_output=True)
+        subprocess.run(["docker", "rm", "rabbitmq-test"], capture_output=True)
 
 
 @pytest.fixture(scope="session")
 def firestore_emulator():
-    """Start Firestore emulator Docker container for test session."""
-    # Clean up any existing container
-    subprocess.run(
-        ["docker", "rm", "-f", "firestore-emulator-test"], capture_output=True
-    )
+    """Start Firestore emulator, or reuse existing service on port."""
+    started_container = False
 
-    # Start emulator
-    subprocess.run(
-        [
-            "docker",
-            "run",
-            "-d",
-            "--name",
-            "firestore-emulator-test",
-            "-p",
-            f"{FIRESTORE_EMULATOR_PORT}:8080",
-            "google/cloud-sdk:emulators",
-            "/bin/bash",
-            "-c",
-            f"gcloud beta emulators firestore start --project={PROJECT_ID} --host-port=0.0.0.0:8080",
-        ],
-        check=True,
-        capture_output=True,
-    )
+    if not _port_is_reachable("localhost", FIRESTORE_EMULATOR_PORT):
+        try:
+            subprocess.run(
+                ["docker", "rm", "-f", "firestore-emulator-test"], capture_output=True
+            )
+            subprocess.run(
+                [
+                    "docker",
+                    "run",
+                    "-d",
+                    "--name",
+                    "firestore-emulator-test",
+                    "-p",
+                    f"{FIRESTORE_EMULATOR_PORT}:8080",
+                    "google/cloud-sdk:emulators",
+                    "/bin/bash",
+                    "-c",
+                    f"gcloud beta emulators firestore start --project={PROJECT_ID} --host-port=0.0.0.0:8080",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            time.sleep(5)
+            started_container = True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pytest.skip(
+                f"Firestore emulator not available on port {FIRESTORE_EMULATOR_PORT}"
+            )
 
     os.environ["FIRESTORE_EMULATOR_HOST"] = f"localhost:{FIRESTORE_EMULATOR_PORT}"
-    time.sleep(5)  # Wait for emulator to be ready
 
     yield
 
-    # Cleanup
-    subprocess.run(["docker", "stop", "firestore-emulator-test"], capture_output=True)
-    subprocess.run(["docker", "rm", "firestore-emulator-test"], capture_output=True)
+    if started_container:
+        subprocess.run(
+            ["docker", "stop", "firestore-emulator-test"], capture_output=True
+        )
+        subprocess.run(["docker", "rm", "firestore-emulator-test"], capture_output=True)
     os.environ.pop("FIRESTORE_EMULATOR_HOST", None)
 
 
 @pytest.fixture(scope="session")
 def gcs_emulator():
-    """Start GCS emulator (fake-gcs-server) Docker container for test session."""
-    # Clean up any existing container
-    subprocess.run(["docker", "rm", "-f", "gcs-emulator-test"], capture_output=True)
+    """Start GCS emulator, or reuse existing service on port."""
+    started_container = False
 
-    # Start fake-gcs-server emulator
-    subprocess.run(
-        [
-            "docker",
-            "run",
-            "-d",
-            "--name",
-            "gcs-emulator-test",
-            "-p",
-            f"{GCS_EMULATOR_PORT}:4443",
-            "fsouza/fake-gcs-server",
-            "-scheme",
-            "http",
-            "-port",
-            "4443",
-        ],
-        check=True,
-        capture_output=True,
-    )
+    if not _port_is_reachable("localhost", GCS_EMULATOR_PORT):
+        try:
+            subprocess.run(
+                ["docker", "rm", "-f", "gcs-emulator-test"], capture_output=True
+            )
+            subprocess.run(
+                [
+                    "docker",
+                    "run",
+                    "-d",
+                    "--name",
+                    "gcs-emulator-test",
+                    "-p",
+                    f"{GCS_EMULATOR_PORT}:4443",
+                    "fsouza/fake-gcs-server",
+                    "-scheme",
+                    "http",
+                    "-port",
+                    "4443",
+                ],
+                check=True,
+                capture_output=True,
+            )
+            time.sleep(3)
+            started_container = True
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            pytest.skip(f"GCS emulator not available on port {GCS_EMULATOR_PORT}")
 
     os.environ["STORAGE_EMULATOR_HOST"] = f"http://localhost:{GCS_EMULATOR_PORT}"
-    time.sleep(3)  # Wait for emulator to be ready
 
     yield
 
-    # Cleanup
-    subprocess.run(["docker", "stop", "gcs-emulator-test"], capture_output=True)
-    subprocess.run(["docker", "rm", "gcs-emulator-test"], capture_output=True)
+    if started_container:
+        subprocess.run(["docker", "stop", "gcs-emulator-test"], capture_output=True)
+        subprocess.run(["docker", "rm", "gcs-emulator-test"], capture_output=True)
     os.environ.pop("STORAGE_EMULATOR_HOST", None)
 
 

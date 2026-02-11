@@ -278,6 +278,10 @@ def rabbitmq_infrastructure(rabbitmq_connection):
     channel.queue_declare(queue=RESPONSE_SUBSCRIPTION, durable=True)
     channel.queue_bind(queue=RESPONSE_SUBSCRIPTION, exchange=RESPONSE_TOPIC)
 
+    # Purge stale messages from previous test runs
+    channel.queue_purge(queue=REQUEST_SUBSCRIPTION)
+    channel.queue_purge(queue=RESPONSE_SUBSCRIPTION)
+
 
 # ============================================================================
 # Storage Adapter Parameterization (Class + Init Args Pattern)

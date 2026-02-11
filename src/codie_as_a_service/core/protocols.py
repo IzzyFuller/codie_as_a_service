@@ -1,6 +1,6 @@
 """Abstract protocols (interfaces) for dependency injection."""
 
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from codie_as_a_service.core.models import (
     LLMResponse,
@@ -13,7 +13,7 @@ from codie_as_a_service.core.models import (
 class MemoryProtocol(Protocol):
     """Abstract interface for memory storage operations."""
 
-    def read_file(self, user_id: str, key: str) -> Optional[str]:
+    def read_file(self, user_id: str, key: str) -> str | None:
         """
         Read a memory file for a user.
 
@@ -58,7 +58,8 @@ class LLMProtocol(Protocol):
         self,
         messages: list["Message"],
         system_prompt: str,
-        tools: Optional[list["ToolDefinition"]] = None,
+        tools: list["ToolDefinition"] | None = None,
+        output_format: dict[str, Any] | None = None,
     ) -> "LLMResponse":
         """
         Call the LLM with messages and optional tools.
@@ -67,6 +68,7 @@ class LLMProtocol(Protocol):
             messages: Conversation history
             system_prompt: System prompt for the agent
             tools: Optional list of tool definitions
+            output_format: Optional JSON schema for structured output
 
         Returns:
             Structured LLM response

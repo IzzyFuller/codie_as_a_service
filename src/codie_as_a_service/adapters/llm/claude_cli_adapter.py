@@ -46,7 +46,7 @@ class ClaudeCliAdapter:
             messages: Conversation history in domain format
             system_prompt: System prompt for the agent
             tools: Optional tool definitions (appended to system prompt)
-            output_format: Optional JSON Schema for structured output (not used)
+            output_format: Optional JSON Schema for structured output (--json-schema)
 
         Returns:
             Structured LLMResponse
@@ -63,8 +63,13 @@ class ClaudeCliAdapter:
         )
         logger.debug("Prompt: %.300s", prompt)
 
+        # Extract JSON schema for structured output
+        json_schema = None
+        if output_format and output_format.get("type") == "json_schema":
+            json_schema = output_format.get("schema")
+
         # Call Claude CLI
-        result = self._run_claude(prompt, full_system_prompt)
+        result = self._run_claude(prompt, full_system_prompt, json_schema=json_schema)
         logger.info("Claude CLI returned %d chars", len(result))
         logger.debug("Result: %.500s", result)
 
@@ -124,7 +129,12 @@ When you have a final answer and don't need any tools, respond with plain text.
                 parts.append(f"Assistant: {msg.content}")
         return "\n\n".join(parts)
 
-    def _run_claude(self, prompt: str, system_prompt: str) -> str:  # pragma: no cover
+    def _run_claude(  # pragma: no cover
+        self,
+        prompt: str,
+        system_prompt: str,
+        json_schema: dict[str, Any] | None = None,
+    ) -> str:
         """
         Run Claude CLI and return result text.
 
@@ -133,6 +143,7 @@ When you have a final answer and don't need any tools, respond with plain text.
         Args:
             prompt: The user prompt
             system_prompt: System prompt to use
+            json_schema: Optional JSON schema to force structured output
 
         Returns:
             The result text from Claude's response
@@ -148,6 +159,9 @@ When you have a final answer and don't need any tools, respond with plain text.
             system_prompt,
         ]
 
+        if json_schema is not None:
+            cmd.extend(["--json-schema", json.dumps(json_schema)])
+
         result = subprocess.run(
             cmd,
             input=prompt,
@@ -155,6 +169,11 @@ When you have a final answer and don't need any tools, respond with plain text.
             text=True,
             timeout=120,
         )
+
+        logger.debug("Claude CLI exit code: %d", result.returncode)
+        if result.stderr:
+            logger.debug("Claude CLI stderr: %.500s", result.stderr)
+        logger.debug("Claude CLI stdout: %.500s", result.stdout)
 
         if result.returncode != 0:
             raise RuntimeError(
@@ -178,7 +197,10 @@ When you have a final answer and don't need any tools, respond with plain text.
                 f"Claude CLI error: {response.get('result', 'Unknown error')}"
             )
 
-        return response.get("result", "")
+        result = response.get("result", "")
+        logger.debug("Raw Claude JSON keys: %s", list(response.keys()))
+        logger.debug("Raw result value: %r", result[:500] if result else result)
+        return result
 
     def _parse_response(self, text: str) -> LLMResponse:
         """

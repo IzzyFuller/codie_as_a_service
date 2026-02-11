@@ -129,12 +129,17 @@ class ReActOrchestrator:
             except (json.JSONDecodeError, ValueError):
                 return self._wrap_tool_loop_output(text_result)
         else:
-            # Single LLM call phase
+            # Single LLM call phase - use JSON schema to force structured output
+            output_format = {
+                "type": "json_schema",
+                "schema": phase.output_schema.model_json_schema(),
+            }
             messages = [Message(role="user", content=phase_input)]
             response = self._llm.call(
                 messages=messages,
                 system_prompt=phase.system_prompt,
                 tools=None,
+                output_format=output_format,
             )
 
             text_parts = []

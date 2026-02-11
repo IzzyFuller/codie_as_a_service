@@ -5,10 +5,14 @@ Implements MessageHandler protocol from synapse.
 
 from synapse.protocols.publisher import PubSubPublisher
 
-from codie_as_a_service.core.models import RunAgentRequest, AgentResponse
-from codie_as_a_service.core.protocols import LLMProtocol, PromptProtocol
+from codie_as_a_service.core.models import (
+    RunAgentRequest,
+    AgentResponse,
+    ToolDefinition,
+)
+from codie_as_a_service.core.protocols import LLMProtocol, PromptProtocol, ToolExecutor
 from codie_as_a_service.services.memory.memory_service import MemoryService
-from codie_as_a_service.services.agent.react_agent import ReActAgent
+from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
 
 
 class AgentMessageHandler:
@@ -16,7 +20,7 @@ class AgentMessageHandler:
     Handles validated RunAgentRequest messages.
 
     Implements MessageHandler protocol from synapse.
-    Processes requests through ReActAgent and publishes AgentResponse.
+    Processes requests through ReActOrchestrator and publishes AgentResponse.
     """
 
     def __init__(
@@ -27,6 +31,9 @@ class AgentMessageHandler:
         prompt_names: list[str],
         response_topic_path: str,
         publisher: PubSubPublisher,
+        tool_executor: ToolExecutor,
+        tools: list[ToolDefinition],
+        orchestrator: ReActOrchestrator,
     ):
         """
         Initialize message handler.
@@ -38,18 +45,15 @@ class AgentMessageHandler:
             prompt_names: List of prompt names to fetch and combine for system prompt
             response_topic_path: Pub/Sub topic path for publishing responses
             publisher: Pub/Sub publisher client
+            tool_executor: Executor for handling tool calls
+            tools: Tool definitions available to the agent
+            orchestrator: ReActOrchestrator for processing requests
         """
         self.memory_service = memory_service
         self.response_topic_path = response_topic_path
         self.publisher = publisher
-
-        # Initialize agent with adapters
-        self.agent = ReActAgent(
-            llm=llm_adapter,
-            prompts=prompt_adapter,
-            memory=memory_service,
-            prompt_names=prompt_names,
-        )
+        self._orchestrator = orchestrator
+        self._tool_executor = tool_executor
 
     def handle(self, request: RunAgentRequest) -> None:
         """
@@ -60,11 +64,12 @@ class AgentMessageHandler:
         Args:
             request: Validated RunAgentRequest (parsed by MessageConsumer)
         """
-        # Process request through agent
+        # Process request through orchestrator
         try:
-            result = self.agent.process(
+            result = self._orchestrator.run(
                 user_id=request.user_id,
-                message=request.message,
+                instruction=request.message,
+                tool_executor=self._tool_executor,
                 output_format=request.output_format,
             )
             response_data = result

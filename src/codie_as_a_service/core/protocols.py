@@ -1,6 +1,6 @@
 """Abstract protocols (interfaces) for dependency injection."""
 
-from typing import Optional, Protocol, runtime_checkable
+from typing import Any, Optional, Protocol, runtime_checkable
 
 from codie_as_a_service.core.models import (
     LLMResponse,
@@ -88,6 +88,25 @@ class PromptProtocol(Protocol):
 
         Returns:
             Compiled prompt string
+        """
+        ...
+
+
+@runtime_checkable
+class ToolExecutor(Protocol):
+    """Abstract interface for tool execution."""
+
+    def execute(self, user_id: str, tool_name: str, tool_input: dict[str, Any]) -> str:
+        """
+        Execute a tool and return the result as a string.
+
+        Args:
+            user_id: User identifier for scoped operations
+            tool_name: Name of the tool to execute
+            tool_input: Input arguments for the tool
+
+        Returns:
+            Tool result as string
         """
         ...
 

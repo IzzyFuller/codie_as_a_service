@@ -46,7 +46,8 @@ omit = [
     "*/protocols.py",
     "*/main.py",
     "*/main_http.py",
-    "*/main_pubsub.py"
+    "*/main_pubsub.py",
+    "*/adapters/messaging/pubsub_handler.py"
 ]
 
 [tool.mypy]

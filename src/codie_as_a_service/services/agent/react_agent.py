@@ -1,12 +1,9 @@
 """ReAct Agent - Reason, Act, Observe loop."""
 
-import json
 import logging
-from typing import Any
 
 from codie_as_a_service.core.models import (
     ContentBlock,
-    DEFAULT_OUTPUT_FORMAT,
     LLMResponse,
     Message,
     ToolDefinition,
@@ -15,6 +12,7 @@ from codie_as_a_service.core.models import (
 from codie_as_a_service.core.protocols import (
     LLMProtocol,
     PromptProtocol,
+    ToolExecutor,
 )
 from codie_as_a_service.services.memory.memory_service import MemoryService
 
@@ -26,6 +24,7 @@ class ReActAgent:
     ReAct agent implementing Reason -> Act -> Observe loop.
 
     Uses LLM to reason about user requests, execute tools, and generate responses.
+    Also serves as reusable mini-loop engine for the orchestrator via run_tool_loop().
     """
 
     def __init__(
@@ -34,6 +33,8 @@ class ReActAgent:
         prompts: PromptProtocol,
         memory: MemoryService,
         prompt_names: list[str],
+        tool_executor: ToolExecutor,
+        tools: list[ToolDefinition],
         max_iterations: int = 10,
         session_lines: int | None = 50,
     ):
@@ -45,6 +46,8 @@ class ReActAgent:
             prompts: Prompt adapter for system prompts
             memory: Memory service for user data
             prompt_names: List of prompt names to fetch and combine for system prompt
+            tool_executor: Executor for handling tool calls
+            tools: Tool definitions available to the agent
             max_iterations: Maximum reasoning iterations before stopping
             session_lines: Number of recent session lines to include (None for all)
         """
@@ -52,73 +55,70 @@ class ReActAgent:
         self._prompts = prompts
         self._memory = memory
         self._prompt_names = prompt_names
+        self._tool_executor = tool_executor
+        self._tools = tools
         self._max_iterations = max_iterations
         self._session_lines = session_lines
 
-    def process(
-        self, user_id: str, message: str, output_format: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    def run_tool_loop(
+        self,
+        system_prompt: str,
+        messages: list[Message],
+        tools: list[ToolDefinition],
+        tool_executor: ToolExecutor,
+        user_id: str,
+        max_iterations: int | None = None,
+    ) -> str:
         """
-        Process a user message through two-phase approach: ReAct loop, then structure output.
+        Execute a tool-calling loop: call LLM, execute tools, repeat until end_turn.
+
+        This is the reusable mini-loop engine used by the orchestrator for
+        tool-using phases (EXTEND, PROCESS, SYNTHESIZE).
 
         Args:
-            user_id: User identifier
-            message: User's message
-            output_format: Optional JSON Schema for structured output (uses default if None)
+            system_prompt: System prompt for this loop
+            messages: Initial messages (at minimum one user message)
+            tools: Tool definitions available in this loop
+            tool_executor: Executor for handling tool calls
+            user_id: User identifier for scoped tool operations
+            max_iterations: Override max iterations (defaults to self._max_iterations)
 
         Returns:
-            Structured data dict (always)
+            Collected text from LLM responses
         """
-        # Phase 1: ReAct loop (always runs with tools)
-        text_result = self._react_loop(user_id, message)
-
-        # Phase 2: Structure output (always runs, uses default if no format specified)
-        effective_format = output_format or DEFAULT_OUTPUT_FORMAT
-        return self._structure_output(text_result, effective_format)
-
-    def _react_loop(self, user_id: str, message: str) -> str:
-        """
-        Execute ReAct loop with tools, return text result.
-
-        Args:
-            user_id: User identifier
-            message: User's message
-
-        Returns:
-            Text result from ReAct loop
-        """
-        # Load identity context for system prompt
-        identity = self._memory.get_identity_context(
-            user_id=user_id, session_lines=self._session_lines
+        effective_max = (
+            max_iterations if max_iterations is not None else self._max_iterations
+        )
+        return self._tool_loop(
+            system_prompt, messages, tools, tool_executor, user_id, effective_max
         )
 
-        # Validate assistant identity exists (me.md equivalent)
-        if not identity.me:
-            raise ValueError(f"No assistant identity configured for user '{user_id}'")
+    def _tool_loop(
+        self,
+        system_prompt: str,
+        messages: list[Message],
+        tools: list[ToolDefinition],
+        tool_executor: ToolExecutor,
+        user_id: str,
+        max_iterations: int,
+    ) -> str:
+        """
+        Core tool-calling loop used by run_tool_loop.
 
-        # Build system prompt with identity by combining all configured prompts
-        prompt_parts = []
-        for prompt_name in self._prompt_names:
-            prompt_part = self._prompts.get_prompt(
-                prompt_name,
-                me=identity.me,
-                context_anchors=identity.context_anchors,
-                current_session=identity.current_session,
-            )
-            prompt_parts.append(prompt_part)
+        Args:
+            system_prompt: System prompt for the LLM
+            messages: Conversation messages
+            tools: Tool definitions for the LLM
+            tool_executor: Executor for tool calls
+            user_id: User identifier
+            max_iterations: Maximum loop iterations
 
-        system_prompt = "\n\n".join(prompt_parts)
-
-        # Initialize conversation with user message
-        messages: list[Message] = [Message(role="user", content=message)]
-
-        # Get tool definitions
-        tools = self._get_tool_definitions()
-
-        # ReAct loop
+        Returns:
+            Collected text from LLM responses
+        """
         collected_text: list[str] = []
 
-        for _ in range(self._max_iterations):
+        for _ in range(max_iterations):
             # Reason: Call LLM
             response = self._llm.call(
                 messages=messages,
@@ -137,7 +137,7 @@ class ReActAgent:
 
             # Act: Execute tools if requested
             if response.stop_reason == "tool_use":
-                tool_results = self._execute_tools(user_id, response)
+                tool_results = self._execute_tools(user_id, response, tool_executor)
 
                 # Add assistant message with tool calls
                 assistant_content = self._format_assistant_message(response)
@@ -154,119 +154,20 @@ class ReActAgent:
             else "I couldn't complete the request."
         )
 
-    def _structure_output(
-        self, text_result: str, output_format: dict[str, Any]
-    ) -> dict[str, Any]:
-        """
-        Transform text result into structured format via LLM call.
-
-        Args:
-            text_result: Text result from ReAct loop
-            output_format: JSON Schema for structured output
-
-        Returns:
-            Structured data dict
-        """
-        messages = [
-            Message(
-                role="user",
-                content=f'Return ONLY valid JSON matching this schema: {{"response": "<your response>"}}.\n\nContent to format:\n{text_result}',
-            )
-        ]
-
-        response = self._llm.call(
-            messages=messages,
-            system_prompt='You are a JSON formatter. Return ONLY valid JSON, no other text. Example: {"response": "Hello!"}',
-            tools=None,
-            output_format=output_format,
-        )
-
-        # Adapter guarantees valid JSON when output_format is provided
-        for block in response.content:
-            if isinstance(block, ContentBlock):
-                return json.loads(block.text)
-
-        # No content from LLM - this is an error condition
-        raise ValueError("LLM returned empty content in structure phase")
-
-    def _get_tool_definitions(self) -> list[ToolDefinition]:
-        """Get available tool definitions."""
-        return [
-            ToolDefinition(
-                name="read_memory",
-                description="Read user memory by key (e.g., 'current_session', 'context_anchors')",
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "key": {
-                            "type": "string",
-                            "description": "Memory key to read",
-                        }
-                    },
-                    "required": ["key"],
-                },
-            ),
-            ToolDefinition(
-                name="write_memory",
-                description="Write content to user memory",
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "key": {
-                            "type": "string",
-                            "description": "Memory key to write",
-                        },
-                        "content": {
-                            "type": "string",
-                            "description": "Content to write",
-                        },
-                    },
-                    "required": ["key", "content"],
-                },
-            ),
-            ToolDefinition(
-                name="list_memory_keys",
-                description="List all memory keys for the user",
-                input_schema={
-                    "type": "object",
-                    "properties": {},
-                },
-            ),
-        ]
-
     def _execute_tools(
-        self, user_id: str, response: LLMResponse
+        self, user_id: str, response: LLMResponse, tool_executor: ToolExecutor
     ) -> list[dict[str, str]]:
         """Execute tool calls from LLM response."""
         results = []
 
         for block in response.content:
             if isinstance(block, ToolUseBlock):
-                result = self._execute_single_tool(user_id, block)
+                result = tool_executor.execute(
+                    user_id=user_id, tool_name=block.name, tool_input=block.input
+                )
                 results.append({"tool_use_id": block.id, "content": result})
 
         return results
-
-    def _execute_single_tool(self, user_id: str, tool: ToolUseBlock) -> str:
-        """Execute a single tool call."""
-        if tool.name == "read_memory":
-            key = tool.input.get("key", "")
-            content = self._memory.read_memory(user_id=user_id, key=key)
-            return content if content else f"No memory found for key: {key}"
-
-        elif tool.name == "write_memory":
-            key = tool.input.get("key", "")
-            content = tool.input.get("content", "")
-            self._memory.write_memory(user_id=user_id, key=key, content=content)
-            return f"Successfully wrote to {key}"
-
-        elif tool.name == "list_memory_keys":
-            keys = self._memory.list_memory_keys(user_id=user_id)
-            return ", ".join(keys) if keys else "No memory keys found"
-
-        # Tools are hardcoded in _get_tool_definitions() - LLM can only request those.
-        # If we reach here, the LLM hallucinated a tool name (shouldn't happen).
-        raise ValueError(f"Unknown tool requested: {tool.name}")  # pragma: no cover
 
     def _format_assistant_message(self, response: LLMResponse) -> str:
         """Format LLM response as assistant message content."""

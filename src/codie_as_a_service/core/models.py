@@ -5,20 +5,6 @@ from typing import Any, Literal, Union
 from pydantic import BaseModel, Field
 
 
-# =============================================================================
-# Default Output Format
-# =============================================================================
-
-DEFAULT_OUTPUT_FORMAT: dict[str, Any] = {
-    "type": "json_schema",
-    "schema": {
-        "type": "object",
-        "properties": {"response": {"type": "string"}},
-        "required": ["response"],
-    },
-}
-
-
 class IdentityContext(BaseModel):
     """
     Core identity files loaded at agent session start.

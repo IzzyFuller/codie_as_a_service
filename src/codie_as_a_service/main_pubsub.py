@@ -18,6 +18,9 @@ from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 from codie_as_a_service.adapters.messaging.pubsub_handler import AgentMessageHandler
 from synapse.adapters.rabbitmq import RabbitMQPublisher, RabbitMQSubscriber
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
+from codie_as_a_service.core.models import ToolDefinition
+from codie_as_a_service.core.protocols import ToolExecutor
+from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
 from codie_as_a_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
 from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
 from codie_as_a_service.core.models import RunAgentRequest
@@ -44,6 +47,9 @@ class AgentApp:
         subscriber: PubSubSubscriber,
         request_subscription_path: str,
         response_topic_path: str,
+        tool_executor: ToolExecutor,
+        tools: list[ToolDefinition],
+        orchestrator: ReActOrchestrator,
     ):
         # Create handler that implements MessageHandler protocol
         handler = AgentMessageHandler(
@@ -53,6 +59,9 @@ class AgentApp:
             prompt_names=prompt_names,
             response_topic_path=response_topic_path,
             publisher=publisher,
+            tool_executor=tool_executor,
+            tools=tools,
+            orchestrator=orchestrator,
         )
 
         # Create consumer from synapse
@@ -88,6 +97,9 @@ def create_app(
     subscriber: PubSubSubscriber,
     request_subscription_path: str,
     response_topic_path: str,
+    tool_executor: ToolExecutor,
+    tools: list[ToolDefinition],
+    orchestrator: ReActOrchestrator,
 ) -> AgentApp:
     """Factory function to create a configured AgentApp."""
     return AgentApp(
@@ -99,6 +111,9 @@ def create_app(
         subscriber=subscriber,
         request_subscription_path=request_subscription_path,
         response_topic_path=response_topic_path,
+        tool_executor=tool_executor,
+        tools=tools,
+        orchestrator=orchestrator,
     )
 
 
@@ -159,6 +174,46 @@ def main() -> None:
     # Build memory service
     memory_service = MemoryService(storage=storage_adapter)
 
+    # Build tool executor and tool definitions
+    from codie_as_a_service.services.tools.memory_tool_executor import (
+        MemoryToolExecutor,
+    )
+    from codie_as_a_service.main_http import (
+        _get_memory_tool_definitions,
+        _build_orchestrator_phases,
+    )
+    from codie_as_a_service.services.agent.react_agent import ReActAgent
+    from codie_as_a_service.core.phase_models import PhaseDefinition, ProcessResult
+
+    tool_executor = MemoryToolExecutor(memory=memory_service)
+    tools = _get_memory_tool_definitions()
+
+    # Build agent and orchestrator
+    agent = ReActAgent(
+        llm=llm_adapter,
+        prompts=prompt_adapter,
+        memory=memory_service,
+        prompt_names=prompt_names,
+        tool_executor=tool_executor,
+        tools=tools,
+    )
+    phases = _build_orchestrator_phases(prompt_adapter, tools)
+    format_phase = PhaseDefinition(
+        name="format",
+        system_prompt=(
+            "You are a JSON formatter. Return ONLY valid JSON, no other text. "
+            'Example: {"response": "Hello!"}'
+        ),
+        output_schema=ProcessResult,
+    )
+    orchestrator = ReActOrchestrator(
+        react_agent=agent,
+        llm=llm_adapter,
+        memory=memory_service,
+        phases=phases,
+        format_phase=format_phase,
+    )
+
     # Create app
     app = create_app(
         memory_service=memory_service,
@@ -169,6 +224,9 @@ def main() -> None:
         subscriber=subscriber,
         request_subscription_path=request_subscription,
         response_topic_path=response_topic,
+        tool_executor=tool_executor,
+        tools=tools,
+        orchestrator=orchestrator,
     )
 
     # Handle graceful shutdown

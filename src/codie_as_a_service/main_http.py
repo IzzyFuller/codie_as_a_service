@@ -22,8 +22,19 @@ from codie_as_a_service.core.protocols import (
     MemoryProtocol,
     PromptProtocol,
 )
+from codie_as_a_service.core.models import ToolDefinition
+from codie_as_a_service.core.phase_models import (
+    ExtendedInstruction,
+    HydratedIdentity,
+    PhaseDefinition,
+    ProcessResult,
+    SynthesisResult,
+    ValidationResult,
+)
 from codie_as_a_service.services.agent.react_agent import ReActAgent
+from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
 from codie_as_a_service.services.memory.memory_service import MemoryService
+from codie_as_a_service.services.tools.memory_tool_executor import MemoryToolExecutor
 
 
 class ChatRequest(BaseModel):
@@ -57,12 +68,36 @@ def create_app(
     """
     app = FastAPI(title="Deep Agent Service")
 
+    # Build tool executor and tool definitions
+    tool_executor = MemoryToolExecutor(memory=memory_service)
+    tools = _get_memory_tool_definitions()
+
     # Initialize agent with adapters
     agent = ReActAgent(
         llm=llm_adapter,
         prompts=prompt_adapter,
         memory=memory_service,
         prompt_names=prompt_names,
+        tool_executor=tool_executor,
+        tools=tools,
+    )
+
+    # Build orchestrator phases and orchestrator
+    phases = _build_orchestrator_phases(prompt_adapter, tools)
+    format_phase = PhaseDefinition(
+        name="format",
+        system_prompt=(
+            "You are a JSON formatter. Return ONLY valid JSON, no other text. "
+            'Example: {"response": "Hello!"}'
+        ),
+        output_schema=ProcessResult,  # Not used for FORMAT
+    )
+    orchestrator = ReActOrchestrator(
+        react_agent=agent,
+        llm=llm_adapter,
+        memory=memory_service,
+        phases=phases,
+        format_phase=format_phase,
     )
 
     def verify_api_key(x_api_key: str | None = Header(None)) -> None:
@@ -78,9 +113,12 @@ def create_app(
     ) -> Generator[str, None, None]:
         """Generate SSE events for chat response."""
         try:
-            # Process through agent (always returns dict)
-            response = agent.process(
-                user_id=user_id, message=message, output_format=output_format
+            # Process through orchestrator (always returns dict)
+            response = orchestrator.run(
+                user_id=user_id,
+                instruction=message,
+                tool_executor=tool_executor,
+                output_format=output_format,
             )
 
             # Emit structured response
@@ -119,6 +157,96 @@ def create_app(
         )
 
     return app
+
+
+def _get_memory_tool_definitions() -> list[ToolDefinition]:
+    """Get the standard memory tool definitions."""
+    return [
+        ToolDefinition(
+            name="read_memory",
+            description="Read user memory by key (e.g., 'current_session', 'context_anchors')",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "Memory key to read",
+                    }
+                },
+                "required": ["key"],
+            },
+        ),
+        ToolDefinition(
+            name="write_memory",
+            description="Write content to user memory",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "key": {
+                        "type": "string",
+                        "description": "Memory key to write",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Content to write",
+                    },
+                },
+                "required": ["key", "content"],
+            },
+        ),
+        ToolDefinition(
+            name="list_memory_keys",
+            description="List all memory keys for the user",
+            input_schema={
+                "type": "object",
+                "properties": {},
+            },
+        ),
+    ]
+
+
+def _build_orchestrator_phases(
+    prompt_adapter: PromptProtocol, tools: list[ToolDefinition]
+) -> list[PhaseDefinition]:
+    """Build the standard orchestrator phase definitions."""
+    return [
+        PhaseDefinition(
+            name="hydrate",
+            system_prompt=prompt_adapter.get_prompt("orchestrator_hydrate"),
+            tools=[],
+            output_schema=HydratedIdentity,
+            max_iterations=1,
+        ),
+        PhaseDefinition(
+            name="extend",
+            system_prompt=prompt_adapter.get_prompt("orchestrator_extend"),
+            tools=tools,
+            output_schema=ExtendedInstruction,
+            max_iterations=5,
+        ),
+        PhaseDefinition(
+            name="process",
+            system_prompt=prompt_adapter.get_prompt("orchestrator_process"),
+            tools=tools,
+            output_schema=ProcessResult,
+            max_iterations=10,
+        ),
+        PhaseDefinition(
+            name="validate",
+            system_prompt=prompt_adapter.get_prompt("orchestrator_validate"),
+            tools=[],
+            output_schema=ValidationResult,
+            max_iterations=1,
+            completes_request=True,
+        ),
+        PhaseDefinition(
+            name="synthesize",
+            system_prompt=prompt_adapter.get_prompt("orchestrator_synthesize"),
+            tools=tools,
+            output_schema=SynthesisResult,
+            max_iterations=5,
+        ),
+    ]
 
 
 def main() -> None:

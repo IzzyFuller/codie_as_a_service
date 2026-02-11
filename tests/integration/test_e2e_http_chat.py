@@ -263,40 +263,6 @@ class TestE2EHTTPChat:
 
         test_app.reset_llm()
 
-    def test_structured_output_with_empty_response_returns_error(self, test_app):
-        """
-        Given: Client sends request with output_format schema
-        When: LLM returns empty content in structure phase (edge case)
-        Then: Client receives error event
-        """
-        user_id, session_id = test_app.setup_user()
-
-        # Configure LLM to return text in ReAct loop, then empty content in structure phase
-        test_app.stub_llm_responses(
-            # Phase 1: ReAct loop response
-            LLMResponseSpec(stop_reason="end_turn", content="Some text result"),
-            # Phase 2: Structured output response (empty - error case)
-            LLMResponseSpec(stop_reason="end_turn", content=None),
-        )
-
-        # Define output schema
-        output_format = {
-            "type": "json_schema",
-            "schema": {
-                "type": "object",
-                "properties": {"name": {"type": "string"}},
-            },
-        }
-
-        # Client sends request with output_format
-        events = test_app.chat(user_id, session_id, "Extract something", output_format)
-
-        # Should receive error event due to empty content in structure phase
-        error_events = [e for e in events if e["event"] == "error"]
-        assert len(error_events) == 1, "Expected exactly one error event"
-
-        test_app.reset_llm()
-
     def test_health_endpoint_does_not_require_auth(self, test_app):
         """
         Given: No authentication header
@@ -372,6 +338,64 @@ class TestE2EHTTPChat:
         events = test_app.chat(user_id, session_id, "What memory keys do I have?")
 
         # Request completed successfully (tool execution worked)
+        done_events = [e for e in events if e["event"] == "done"]
+        assert len(done_events) == 1
+
+        test_app.reset_llm()
+
+    def test_request_completes_when_validation_needs_retry(self, test_app):
+        """
+        Given: Internal validation determines first attempt is incomplete
+        When: System retries processing
+        Then: Client receives a successful response
+
+        The client doesn't know about iterations - it just gets a response.
+        """
+        user_id, session_id = test_app.setup_user()
+
+        test_app.stub_llm_responses(
+            LLMResponseSpec(stop_reason="end_turn", content="Working on it."),
+            LLMResponseSpec(
+                stop_reason="end_turn",
+                content='{"response": "Done after additional processing"}',
+            ),
+            iterations=2,
+        )
+
+        events = test_app.chat(user_id, session_id, "Help me with something complex")
+
+        response_events = [e for e in events if e["event"] == "response"]
+        done_events = [e for e in events if e["event"] == "done"]
+
+        assert len(response_events) == 1
+        assert len(done_events) == 1
+
+        test_app.reset_llm()
+
+    def test_request_completes_even_when_validation_never_satisfied(self, test_app):
+        """
+        Given: Internal validation is never fully satisfied
+        When: System reaches its internal retry limit
+        Then: Client still receives a response (doesn't hang forever)
+
+        Safety mechanism: even if something goes wrong internally,
+        the client always gets a response.
+        """
+        user_id, session_id = test_app.setup_user()
+
+        # iterations=4 exceeds max_outer_iterations (3), so validation
+        # never passes within the limit - tests the safety exit
+        test_app.stub_llm_responses(
+            LLMResponseSpec(stop_reason="end_turn", content="Still trying..."),
+            LLMResponseSpec(
+                stop_reason="end_turn",
+                content='{"response": "Best effort result"}',
+            ),
+            iterations=4,
+        )
+
+        events = test_app.chat(user_id, session_id, "This is tricky")
+
         done_events = [e for e in events if e["event"] == "done"]
         assert len(done_events) == 1
 

@@ -1,0 +1,217 @@
+"""ReActOrchestrator - Multi-phase orchestration loop."""
+
+import json
+import logging
+from typing import Any
+
+from pydantic import BaseModel
+
+from codie_as_a_service.core.models import (
+    ContentBlock,
+    Message,
+)
+from codie_as_a_service.core.phase_models import (
+    OrchestrationContext,
+    PhaseDefinition,
+    ProcessResult,
+    ValidationResult,
+)
+from codie_as_a_service.core.protocols import LLMProtocol, ToolExecutor
+from codie_as_a_service.services.agent.react_agent import ReActAgent
+from codie_as_a_service.services.memory.memory_service import MemoryService
+
+logger = logging.getLogger(__name__)
+
+
+class ReActOrchestrator:
+    """
+    Multi-phase orchestration loop.
+
+    Runs phases in sequence per iteration, checks validation for completion,
+    loops back when not done. FORMAT phase runs after the outer loop exits.
+    """
+
+    def __init__(
+        self,
+        react_agent: ReActAgent,
+        llm: LLMProtocol,
+        memory: MemoryService,
+        phases: list[PhaseDefinition],
+        format_phase: PhaseDefinition,
+        max_outer_iterations: int = 3,
+        session_lines: int | None = 50,
+    ) -> None:
+        self._react_agent = react_agent
+        self._llm = llm
+        self._memory = memory
+        self._phases = phases
+        self._format_phase = format_phase
+        self._max_outer_iterations = max_outer_iterations
+        self._session_lines = session_lines
+
+    def run(
+        self,
+        user_id: str,
+        instruction: str,
+        tool_executor: ToolExecutor,
+        output_format: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Run the full orchestration loop then format output.
+
+        Returns structured dict matching output_format schema.
+        """
+        # Load identity context for this user
+        identity = self._memory.get_identity_context(
+            user_id=user_id, session_lines=self._session_lines
+        )
+        if not identity.me:
+            raise ValueError(f"No assistant identity configured for user '{user_id}'")
+
+        context = OrchestrationContext(user_id=user_id, instruction=instruction)
+
+        for iteration in range(self._max_outer_iterations):
+            context.iteration = iteration
+
+            completed = False
+            for phase in self._phases:
+                result = self._execute_phase(phase, context, tool_executor, identity)
+                setattr(context, phase.name, result)
+
+                if (
+                    phase.completes_request
+                    and isinstance(result, ValidationResult)
+                    and result.done
+                ):
+                    completed = True
+                    break
+
+            if completed:
+                break
+
+            # Reset phase outputs for next iteration
+            # (synthesize writes persist via memory, not context)
+            if iteration < self._max_outer_iterations - 1:
+                context.hydrate = None
+                context.extend = None
+                context.process = None
+                context.validate = None
+                context.synthesize = None
+
+        # FORMAT phase: structure the process output
+        return self._execute_format(context, output_format)
+
+    def _execute_phase(
+        self,
+        phase: PhaseDefinition,
+        context: OrchestrationContext,
+        tool_executor: ToolExecutor,
+        identity: Any = None,
+    ) -> BaseModel:
+        """Execute a single phase and return its typed output."""
+        phase_input = self._build_phase_input(phase, context, identity)
+
+        if phase.tools:
+            # Tool-using phase: delegate to mini-loop engine
+            messages = [Message(role="user", content=phase_input)]
+            text_result = self._react_agent.run_tool_loop(
+                system_prompt=phase.system_prompt,
+                messages=messages,
+                tools=phase.tools,
+                tool_executor=tool_executor,
+                user_id=context.user_id,
+                max_iterations=phase.max_iterations,
+            )
+            try:
+                return self._parse_phase_output(text_result, phase.output_schema)
+            except (json.JSONDecodeError, ValueError):
+                return self._wrap_tool_loop_output(text_result)
+        else:
+            # Single LLM call phase
+            messages = [Message(role="user", content=phase_input)]
+            response = self._llm.call(
+                messages=messages,
+                system_prompt=phase.system_prompt,
+                tools=None,
+            )
+
+            text_parts = []
+            for block in response.content:
+                if isinstance(block, ContentBlock):
+                    text_parts.append(block.text)
+
+            text_result = " ".join(text_parts)
+            return self._parse_phase_output(text_result, phase.output_schema)
+
+    def _execute_format(
+        self,
+        context: OrchestrationContext,
+        output_format: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Run FORMAT phase to structure the final output."""
+        content = context.process.output if context.process else ""
+
+        format_input = (
+            f"Format the following content into the required output structure.\n\n"
+            f"Content:\n{content}"
+        )
+
+        messages = [Message(role="user", content=format_input)]
+        response = self._llm.call(
+            messages=messages,
+            system_prompt=self._format_phase.system_prompt,
+            tools=None,
+            output_format=output_format,
+        )
+
+        for block in response.content:
+            if isinstance(block, ContentBlock):
+                return json.loads(block.text)
+
+    def _build_phase_input(
+        self,
+        phase: PhaseDefinition,
+        context: OrchestrationContext,
+        identity: Any = None,
+    ) -> str:
+        """Build the user message input for a phase from context."""
+        parts = [f"Instruction: {context.instruction}"]
+        parts.append(f"Iteration: {context.iteration}")
+
+        # Include identity context for HYDRATE phase
+        if phase.name == "hydrate" and identity is not None:
+            parts.append(f"Identity: {identity.me}")
+            parts.append(f"Context Anchors: {identity.context_anchors}")
+            parts.append(f"Current Session: {identity.current_session}")
+
+        if context.hydrate:
+            parts.append(f"Identity Summary: {context.hydrate.summary}")
+            parts.append(f"Key Patterns: {', '.join(context.hydrate.key_patterns)}")
+            parts.append(f"Session State: {context.hydrate.session_state}")
+
+        if context.extend:
+            parts.append(f"Extended Instruction: {context.extend.instruction}")
+            parts.append(f"Tool Manifest: {', '.join(context.extend.tool_manifest)}")
+            parts.append(f"Rationale: {context.extend.rationale}")
+
+        if context.process:
+            parts.append(f"Process Output: {context.process.output}")
+            parts.append(f"Tools Used: {', '.join(context.process.tools_used)}")
+
+        if context.validate:
+            parts.append(f"Validation Done: {context.validate.done}")
+            parts.append(f"Validation Feedback: {context.validate.feedback}")
+
+        return "\n\n".join(parts)
+
+    def _parse_phase_output(
+        self, text: str, output_schema: type[BaseModel]
+    ) -> BaseModel:
+        """Parse text output into the phase's Pydantic model."""
+        text = text.strip()
+        data = json.loads(text)
+        return output_schema(**data)
+
+    def _wrap_tool_loop_output(self, text: str) -> ProcessResult:
+        """Wrap raw tool loop text into ProcessResult when JSON parsing fails."""
+        return ProcessResult(output=text, tools_used=[], trace="")

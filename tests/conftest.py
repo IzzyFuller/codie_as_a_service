@@ -26,7 +26,15 @@ from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
 from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 from codie_as_a_service.adapters.llm.claude_cli_adapter import ClaudeCliAdapter
 from codie_as_a_service.main_pubsub import create_app
-from codie_as_a_service.main_http import create_app as create_http_app
+from codie_as_a_service.main_http import (
+    create_app as create_http_app,
+    _get_memory_tool_definitions,
+    _build_orchestrator_phases,
+)
+from codie_as_a_service.core.phase_models import PhaseDefinition, ProcessResult
+from codie_as_a_service.services.agent.react_agent import ReActAgent
+from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
+from codie_as_a_service.services.tools.memory_tool_executor import MemoryToolExecutor
 
 # ============================================================================
 # Domain-Level Test Response Specs (Adapter-Agnostic)
@@ -405,6 +413,34 @@ def agent_app(
     Session-scoped to maintain RabbitMQ connection state.
     Uses dedicated pubsub_memory_service (not parameterized).
     """
+    # Build tool executor, tools, agent, and orchestrator
+    tool_executor = MemoryToolExecutor(memory=pubsub_memory_service)
+    tools = _get_memory_tool_definitions()
+    agent = ReActAgent(
+        llm=pubsub_llm_adapter,
+        prompts=file_prompt_adapter,
+        memory=pubsub_memory_service,
+        prompt_names=["codie_as_a_service_system"],
+        tool_executor=tool_executor,
+        tools=tools,
+    )
+    phases = _build_orchestrator_phases(file_prompt_adapter, tools)
+    format_phase = PhaseDefinition(
+        name="format",
+        system_prompt=(
+            "You are a JSON formatter. Return ONLY valid JSON, no other text. "
+            'Example: {"response": "Hello!"}'
+        ),
+        output_schema=ProcessResult,
+    )
+    orchestrator = ReActOrchestrator(
+        react_agent=agent,
+        llm=pubsub_llm_adapter,
+        memory=pubsub_memory_service,
+        phases=phases,
+        format_phase=format_phase,
+    )
+
     # Adapters implement synapse protocols
     app = create_app(
         memory_service=pubsub_memory_service,
@@ -415,6 +451,9 @@ def agent_app(
         subscriber=rabbitmq_subscriber,
         request_subscription_path=REQUEST_SUBSCRIPTION,
         response_topic_path=RESPONSE_TOPIC,
+        tool_executor=tool_executor,
+        tools=tools,
+        orchestrator=orchestrator,
     )
     app.start()
     yield app
@@ -510,11 +549,30 @@ def file_prompt_adapter():
 
     # Define test prompts - using variables that ReActAgent actually passes
     # (me, context_anchors, current_session)
+    # Orchestrator phase prompts use {{}} for JSON examples (escaped for .format())
     test_prompts = {
         "codie_as_a_service_system.txt": (
             "You are a helpful AI assistant with access to user memory. "
             "Identity: {me}. Context: {context_anchors}. Session: {current_session}. "
             "You can read and write to the user's memory using the provided tools."
+        ),
+        "orchestrator_hydrate.txt": (
+            "You are an identity hydration agent. Return JSON with summary, key_patterns, session_state."
+        ),
+        "orchestrator_extend.txt": (
+            "You are an instruction extension agent. Return JSON with instruction, tool_manifest, rationale, memory_references."
+        ),
+        "orchestrator_process.txt": (
+            "You are a processing agent. Execute the instruction using available tools. "
+            "Return JSON with output, tools_used, trace."
+        ),
+        "orchestrator_validate.txt": (
+            "You are a validation agent. Assess if the processing result addresses the instruction. "
+            "Return JSON with done, justification, feedback."
+        ),
+        "orchestrator_synthesize.txt": (
+            "You are a synthesis agent. Persist important information to memory. "
+            "Return JSON with writes, summary."
         ),
     }
 
@@ -714,21 +772,84 @@ class TestApp:
 
         return user_id, session_id
 
-    def stub_llm_responses(self, *responses: LLMResponseSpec) -> None:
+    def stub_llm_responses(
+        self, *responses: LLMResponseSpec, iterations: int = 1
+    ) -> None:
         """
         Configure LLM to return these responses in sequence.
 
         Args:
             responses: Domain-level response specs. Converted internally
                       to text that the adapter will parse.
+            iterations: Number of orchestrator iterations. Default 1 means
+                       validation passes immediately. Higher values simulate
+                       validation requiring more work before completing.
         """
-        adapter_responses = [self._to_adapter_response(r) for r in responses]
+        adapter_responses = self._wrap_with_phase_defaults(list(responses), iterations)
+
         if self._is_claude_cli:
             # ClaudeCliAdapter: mock _run_claude method
             self._llm_adapter._run_claude.side_effect = adapter_responses
         else:
             # LocalLLMAdapter: mock tokenizer.decode
             self._llm_adapter._tokenizer.decode.side_effect = adapter_responses
+
+    def _wrap_with_phase_defaults(
+        self, responses: list[LLMResponseSpec], iterations: int = 1
+    ) -> list[str]:
+        """
+        Wrap test responses with auto-generated orchestrator phase defaults.
+
+        Maps: all-but-last responses -> PROCESS phase (repeated per iteration)
+              last response -> FORMAT phase
+        Auto-generates: HYDRATE, EXTEND, VALIDATE, SYNTHESIZE per iteration.
+        """
+        if len(responses) >= 2:
+            process_specs = responses[:-1]
+            format_spec = responses[-1]
+        elif len(responses) == 1:
+            process_specs = []
+            format_spec = responses[0]
+        else:
+            return []
+
+        # Auto-generated phase defaults
+        hydrate = LLMResponseSpec(
+            stop_reason="end_turn",
+            content='{"summary": "Test identity", "key_patterns": [], "session_state": "Testing"}',
+        )
+        extend = LLMResponseSpec(
+            stop_reason="end_turn",
+            content='{"instruction": "Process request", "tool_manifest": [], "rationale": "Direct", "memory_references": []}',
+        )
+        validate_pass = LLMResponseSpec(
+            stop_reason="end_turn",
+            content='{"done": true, "justification": "Request completed", "feedback": ""}',
+        )
+        validate_fail = LLMResponseSpec(
+            stop_reason="end_turn",
+            content='{"done": false, "justification": "Needs more work", "feedback": "Incomplete"}',
+        )
+        synthesize = LLMResponseSpec(
+            stop_reason="end_turn",
+            content='{"writes": [], "summary": "Persisted state"}',
+        )
+
+        full_sequence = []
+        for i in range(iterations):
+            is_last = i == iterations - 1
+            full_sequence.append(hydrate)
+            full_sequence.append(extend)
+            full_sequence.extend(process_specs)
+            if is_last:
+                full_sequence.append(validate_pass)
+                # SYNTHESIZE skipped when done=True (loop breaks)
+            else:
+                full_sequence.append(validate_fail)
+                full_sequence.append(synthesize)
+
+        full_sequence.append(format_spec)
+        return [self._to_adapter_response(r) for r in full_sequence]
 
     def reset_llm(self) -> None:
         """Reset LLM mock to default state."""

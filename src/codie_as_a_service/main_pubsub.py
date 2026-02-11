@@ -3,15 +3,13 @@
 Uses MessageConsumer from synapse for message handling.
 """
 
+import logging
 import os
 import signal
 import threading
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
 import pika
+from dotenv import load_dotenv
 from google.cloud import storage
 from synapse.consumer.message_consumer import MessageConsumer
 from synapse.protocols.publisher import PubSubPublisher
@@ -30,6 +28,13 @@ from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
 from codie_as_a_service.core.models import RunAgentRequest
 from codie_as_a_service.core.protocols import LLMProtocol, MemoryProtocol
 from codie_as_a_service.services.memory.memory_service import MemoryService
+
+load_dotenv()
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 class AgentApp:

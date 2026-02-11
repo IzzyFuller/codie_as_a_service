@@ -6,6 +6,7 @@ Disables built-in tools and passes custom tool definitions via system prompt.
 """
 
 import json
+import logging
 import re
 import subprocess
 from typing import Any
@@ -17,6 +18,9 @@ from codie_as_a_service.core.models import (
     ToolDefinition,
     ToolUseBlock,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 class ClaudeCliAdapter:
@@ -52,9 +56,17 @@ class ClaudeCliAdapter:
 
         # Build conversation as single prompt
         prompt = self._build_prompt(messages)
+        logger.info(
+            "Calling Claude CLI (prompt length: %d, system length: %d)",
+            len(prompt),
+            len(full_system_prompt),
+        )
+        logger.debug("Prompt: %.300s", prompt)
 
         # Call Claude CLI
         result = self._run_claude(prompt, full_system_prompt)
+        logger.info("Claude CLI returned %d chars", len(result))
+        logger.debug("Result: %.500s", result)
 
         # Parse response
         return self._parse_response(result)

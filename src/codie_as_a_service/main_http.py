@@ -1,14 +1,12 @@
 """HTTP entry point for deep agent service."""
 
 import json
+import logging
 import os
 from typing import Any, Generator
 
-from dotenv import load_dotenv
-
-load_dotenv()
-
 import uvicorn
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
 from google.cloud import storage
@@ -39,6 +37,13 @@ from codie_as_a_service.services.agent.react_agent import ReActAgent
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
 from codie_as_a_service.services.memory.memory_service import MemoryService
 from codie_as_a_service.services.tools.memory_tool_executor import MemoryToolExecutor
+
+load_dotenv()
+logging.basicConfig(
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
 class ChatRequest(BaseModel):

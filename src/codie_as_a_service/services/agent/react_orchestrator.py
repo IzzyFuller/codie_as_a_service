@@ -109,7 +109,9 @@ class ReActOrchestrator:
         identity: Any = None,
     ) -> BaseModel:
         """Execute a single phase and return its typed output."""
+        logger.info("Phase %s starting (iteration %d)", phase.name, context.iteration)
         phase_input = self._build_phase_input(phase, context, identity)
+        logger.debug("Phase %s input: %.200s", phase.name, phase_input)
 
         if phase.tools:
             # Tool-using phase: delegate to mini-loop engine
@@ -141,6 +143,7 @@ class ReActOrchestrator:
                     text_parts.append(block.text)
 
             text_result = " ".join(text_parts)
+            logger.info("Phase %s got LLM response: %.200s", phase.name, text_result)
             return self._parse_phase_output(text_result, phase.output_schema)
 
     def _execute_format(
@@ -209,6 +212,7 @@ class ReActOrchestrator:
     ) -> BaseModel:
         """Parse text output into the phase's Pydantic model."""
         text = text.strip()
+        logger.debug("Parsing %s output: %.500s", output_schema.__name__, text)
         data = json.loads(text)
         return output_schema(**data)
 

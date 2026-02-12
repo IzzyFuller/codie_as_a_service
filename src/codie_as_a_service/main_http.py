@@ -229,9 +229,7 @@ def _build_orchestrator_phases(
         PhaseDefinition(
             name="extend",
             system_prompt=prompt_adapter.get_prompt("orchestrator_extend"),
-            tools=tools,
             output_schema=ExtendedInstruction,
-            max_iterations=5,
         ),
         PhaseDefinition(
             name="process",

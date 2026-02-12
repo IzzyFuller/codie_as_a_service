@@ -1,6 +1,6 @@
 """Phase output models and orchestration config for the ReActOrchestrator."""
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel
 
 from codie_as_a_service.core.models import ToolDefinition
 
@@ -64,8 +64,7 @@ class PhaseDefinition(BaseModel):
     output_schema: type[BaseModel]
     max_iterations: int = 1
     completes_request: bool = False
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    max_new_tokens: int | None = None
 
 
 # =============================================================================
@@ -76,7 +75,7 @@ class PhaseDefinition(BaseModel):
 class OrchestrationContext(BaseModel):
     """Mutable state passed between phases within an iteration."""
 
-    user_id: str
+    agent_id: str
     instruction: str
     iteration: int = 0
     hydrate: HydratedIdentity | None = None

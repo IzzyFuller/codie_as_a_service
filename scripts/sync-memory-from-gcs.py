@@ -5,7 +5,7 @@ This script fetches session notes from the GCS emulator (Docker) and
 identifies new entries that can be merged into local memory.
 
 Usage:
-    python scripts/sync-memory-from-gcs.py [user_id]
+    python scripts/sync-memory-from-gcs.py [agent_id]
 
     # Show new notes from GCS that aren't in local memory
     python scripts/sync-memory-from-gcs.py demo-user
@@ -38,9 +38,9 @@ if not CODIE_MEMORY_PATH:
 CODIE_MEMORY_DIR = Path(CODIE_MEMORY_PATH)
 
 
-def fetch_gcs_session(user_id: str) -> str | None:
+def fetch_gcs_session(agent_id: str) -> str | None:
     """Fetch current_session.md from GCS emulator for user."""
-    url = f"{GCS_EMULATOR_URL}/storage/v1/b/{GCS_BUCKET_NAME}/o/users%2F{user_id}%2Fcurrent_session.md?alt=media"
+    url = f"{GCS_EMULATOR_URL}/storage/v1/b/{GCS_BUCKET_NAME}/o/agents%2F{agent_id}%2Fcurrent_session.md?alt=media"
 
     try:
         response = httpx.get(url, timeout=10.0)
@@ -99,7 +99,7 @@ def find_new_notes(gcs_notes: list[dict], local_notes: list[dict]) -> list[dict]
 def main():
     parser = argparse.ArgumentParser(description="Sync session notes from GCS to local")
     parser.add_argument(
-        "user_id",
+        "agent_id",
         nargs="?",
         default="demo-user",
         help="GCS user ID (default: demo-user)",
@@ -108,8 +108,8 @@ def main():
     args = parser.parse_args()
 
     # Fetch both versions
-    print(f"Fetching session from GCS for user: {args.user_id}", file=sys.stderr)
-    gcs_content = fetch_gcs_session(args.user_id)
+    print(f"Fetching session from GCS for user: {args.agent_id}", file=sys.stderr)
+    gcs_content = fetch_gcs_session(args.agent_id)
     if not gcs_content:
         sys.exit(1)
 

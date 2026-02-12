@@ -13,12 +13,12 @@ from codie_as_a_service.core.models import (
 class MemoryProtocol(Protocol):
     """Abstract interface for memory storage operations."""
 
-    def read_file(self, user_id: str, key: str) -> str | None:
+    def read_file(self, agent_id: str, key: str) -> str | None:
         """
-        Read a memory file for a user.
+        Read a memory file for an agent.
 
         Args:
-            user_id: User identifier
+            agent_id: Agent identifier
             key: Memory key (e.g., 'current_session', 'context_anchors')
 
         Returns:
@@ -26,23 +26,23 @@ class MemoryProtocol(Protocol):
         """
         ...
 
-    def write_file(self, user_id: str, key: str, content: str) -> None:
+    def write_file(self, agent_id: str, key: str, content: str) -> None:
         """
-        Write a memory file for a user.
+        Write a memory file for an agent.
 
         Args:
-            user_id: User identifier
+            agent_id: Agent identifier
             key: Memory key
             content: Content to write
         """
         ...
 
-    def list_files(self, user_id: str) -> list[str]:
+    def list_files(self, agent_id: str) -> list[str]:
         """
-        List all memory files for a user.
+        List all memory files for an agent.
 
         Args:
-            user_id: User identifier
+            agent_id: Agent identifier
 
         Returns:
             List of memory keys
@@ -60,6 +60,7 @@ class LLMProtocol(Protocol):
         system_prompt: str,
         tools: list["ToolDefinition"] | None = None,
         output_format: dict[str, Any] | None = None,
+        max_new_tokens: int | None = None,
     ) -> "LLMResponse":
         """
         Call the LLM with messages and optional tools.
@@ -69,6 +70,7 @@ class LLMProtocol(Protocol):
             system_prompt: System prompt for the agent
             tools: Optional list of tool definitions
             output_format: Optional JSON schema for structured output
+            max_new_tokens: Optional max tokens to generate (adapter-specific)
 
         Returns:
             Structured LLM response
@@ -98,12 +100,12 @@ class PromptProtocol(Protocol):
 class ToolExecutor(Protocol):
     """Abstract interface for tool execution."""
 
-    def execute(self, user_id: str, tool_name: str, tool_input: dict[str, Any]) -> str:
+    def execute(self, agent_id: str, tool_name: str, tool_input: dict[str, Any]) -> str:
         """
         Execute a tool and return the result as a string.
 
         Args:
-            user_id: User identifier for scoped operations
+            agent_id: Agent identifier for scoped operations
             tool_name: Name of the tool to execute
             tool_input: Input arguments for the tool
 

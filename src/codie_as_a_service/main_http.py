@@ -49,7 +49,7 @@ logger = logging.getLogger(__name__)
 class ChatRequest(BaseModel):
     """Request body for /chat endpoint."""
 
-    user_id: str
+    agent_id: str
     session_id: str
     message: str
     output_format: dict[str, Any] | None = None
@@ -66,7 +66,7 @@ def create_app(
     Create FastAPI app with chat endpoint.
 
     Args:
-        memory_service: Service for reading/writing user memory
+        memory_service: Service for reading/writing agent memory
         llm_adapter: OpenAI-compatible LLM adapter
         prompt_adapter: File-based prompt adapter
         prompt_names: List of prompt names to fetch and combine for system prompt
@@ -115,7 +115,7 @@ def create_app(
             raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
     def generate_sse_events(
-        user_id: str,
+        agent_id: str,
         session_id: str,
         message: str,
         output_format: dict[str, Any] | None = None,
@@ -124,7 +124,7 @@ def create_app(
         try:
             # Process through orchestrator (always returns dict)
             response = orchestrator.run(
-                user_id=user_id,
+                agent_id=agent_id,
                 instruction=message,
                 tool_executor=tool_executor,
                 output_format=output_format,
@@ -157,7 +157,7 @@ def create_app(
         """
         return StreamingResponse(
             generate_sse_events(
-                request.user_id,
+                request.agent_id,
                 request.session_id,
                 request.message,
                 request.output_format,
@@ -173,7 +173,7 @@ def _get_memory_tool_definitions() -> list[ToolDefinition]:
     return [
         ToolDefinition(
             name="read_memory",
-            description="Read user memory by key (e.g., 'current_session', 'context_anchors')",
+            description="Read agent memory by key (e.g., 'current_session', 'context_anchors')",
             input_schema={
                 "type": "object",
                 "properties": {
@@ -187,7 +187,7 @@ def _get_memory_tool_definitions() -> list[ToolDefinition]:
         ),
         ToolDefinition(
             name="write_memory",
-            description="Write content to user memory",
+            description="Write content to agent memory",
             input_schema={
                 "type": "object",
                 "properties": {
@@ -205,7 +205,7 @@ def _get_memory_tool_definitions() -> list[ToolDefinition]:
         ),
         ToolDefinition(
             name="list_memory_keys",
-            description="List all memory keys for the user",
+            description="List all memory keys for the agent",
             input_schema={
                 "type": "object",
                 "properties": {},
@@ -225,6 +225,7 @@ def _build_orchestrator_phases(
             tools=[],
             output_schema=HydratedIdentity,
             max_iterations=1,
+            max_new_tokens=512,
         ),
         PhaseDefinition(
             name="extend",
@@ -232,6 +233,7 @@ def _build_orchestrator_phases(
             tools=tools,
             output_schema=ExtendedInstruction,
             max_iterations=5,
+            max_new_tokens=1024,
         ),
         PhaseDefinition(
             name="process",
@@ -239,6 +241,7 @@ def _build_orchestrator_phases(
             tools=tools,
             output_schema=ProcessResult,
             max_iterations=10,
+            max_new_tokens=2048,
         ),
         PhaseDefinition(
             name="validate",
@@ -247,6 +250,7 @@ def _build_orchestrator_phases(
             output_schema=ValidationResult,
             max_iterations=1,
             completes_request=True,
+            max_new_tokens=256,
         ),
         PhaseDefinition(
             name="synthesize",
@@ -254,6 +258,7 @@ def _build_orchestrator_phases(
             tools=tools,
             output_schema=SynthesisResult,
             max_iterations=5,
+            max_new_tokens=1024,
         ),
     ]
 

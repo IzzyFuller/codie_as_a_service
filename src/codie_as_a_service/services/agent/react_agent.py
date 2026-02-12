@@ -44,7 +44,7 @@ class ReActAgent:
         Args:
             llm: LLM adapter for reasoning
             prompts: Prompt adapter for system prompts
-            memory: Memory service for user data
+            memory: Memory service for agent data
             prompt_names: List of prompt names to fetch and combine for system prompt
             tool_executor: Executor for handling tool calls
             tools: Tool definitions available to the agent
@@ -66,8 +66,9 @@ class ReActAgent:
         messages: list[Message],
         tools: list[ToolDefinition],
         tool_executor: ToolExecutor,
-        user_id: str,
+        agent_id: str,
         max_iterations: int | None = None,
+        max_new_tokens: int | None = None,
     ) -> str:
         """
         Execute a tool-calling loop: call LLM, execute tools, repeat until end_turn.
@@ -80,8 +81,9 @@ class ReActAgent:
             messages: Initial messages (at minimum one user message)
             tools: Tool definitions available in this loop
             tool_executor: Executor for handling tool calls
-            user_id: User identifier for scoped tool operations
+            agent_id: Agent identifier for scoped tool operations
             max_iterations: Override max iterations (defaults to self._max_iterations)
+            max_new_tokens: Max tokens per LLM call (passed through to adapter)
 
         Returns:
             Collected text from LLM responses
@@ -90,7 +92,13 @@ class ReActAgent:
             max_iterations if max_iterations is not None else self._max_iterations
         )
         return self._tool_loop(
-            system_prompt, messages, tools, tool_executor, user_id, effective_max
+            system_prompt,
+            messages,
+            tools,
+            tool_executor,
+            agent_id,
+            effective_max,
+            max_new_tokens=max_new_tokens,
         )
 
     def _tool_loop(
@@ -99,8 +107,9 @@ class ReActAgent:
         messages: list[Message],
         tools: list[ToolDefinition],
         tool_executor: ToolExecutor,
-        user_id: str,
+        agent_id: str,
         max_iterations: int,
+        max_new_tokens: int | None = None,
     ) -> str:
         """
         Core tool-calling loop used by run_tool_loop.
@@ -110,8 +119,9 @@ class ReActAgent:
             messages: Conversation messages
             tools: Tool definitions for the LLM
             tool_executor: Executor for tool calls
-            user_id: User identifier
+            agent_id: Agent identifier
             max_iterations: Maximum loop iterations
+            max_new_tokens: Max tokens per LLM call (passed through to adapter)
 
         Returns:
             Collected text from LLM responses
@@ -124,6 +134,7 @@ class ReActAgent:
                 messages=messages,
                 system_prompt=system_prompt,
                 tools=tools,
+                max_new_tokens=max_new_tokens,
             )
 
             # Collect any text content
@@ -137,7 +148,7 @@ class ReActAgent:
 
             # Act: Execute tools if requested
             if response.stop_reason == "tool_use":
-                tool_results = self._execute_tools(user_id, response, tool_executor)
+                tool_results = self._execute_tools(agent_id, response, tool_executor)
 
                 # Add assistant message with tool calls
                 assistant_content = self._format_assistant_message(response)
@@ -155,7 +166,7 @@ class ReActAgent:
         )
 
     def _execute_tools(
-        self, user_id: str, response: LLMResponse, tool_executor: ToolExecutor
+        self, agent_id: str, response: LLMResponse, tool_executor: ToolExecutor
     ) -> list[dict[str, str]]:
         """Execute tool calls from LLM response."""
         results = []
@@ -163,7 +174,7 @@ class ReActAgent:
         for block in response.content:
             if isinstance(block, ToolUseBlock):
                 result = tool_executor.execute(
-                    user_id=user_id, tool_name=block.name, tool_input=block.input
+                    agent_id=agent_id, tool_name=block.name, tool_input=block.input
                 )
                 results.append({"tool_use_id": block.id, "content": result})
 

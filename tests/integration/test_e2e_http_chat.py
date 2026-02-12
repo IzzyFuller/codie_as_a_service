@@ -2,7 +2,7 @@
 E2E Acceptance Test: HTTP Chat Endpoint
 
 Tests describe the system from a CLIENT perspective:
-- Client POSTs to /chat endpoint with user_id, session_id, message
+- Client POSTs to /chat endpoint with agent_id, session_id, message
 - Client receives SSE stream with text events and done event
 - Client knows NOTHING about handlers, agents, adapters, memory services, etc.
 
@@ -25,7 +25,7 @@ class TestE2EHTTPChat:
         When: Client POSTs to /chat with message
         Then: Client receives SSE stream with response event containing default structured format
         """
-        user_id, session_id = test_app.setup_user()
+        agent_id, session_id = test_app.setup_agent()
 
         # Configure LLM responses for two-phase flow
         test_app.stub_llm_responses(
@@ -38,7 +38,7 @@ class TestE2EHTTPChat:
             ),
         )
 
-        events = test_app.chat(user_id, session_id, "Hello, can you help me?")
+        events = test_app.chat(agent_id, session_id, "Hello, can you help me?")
 
         # Should receive exactly one response event and a done event
         response_events = [e for e in events if e["event"] == "response"]
@@ -85,7 +85,7 @@ class TestE2EHTTPChat:
         memory contains expected content afterward. Client doesn't
         know HOW it happened, just that it DID happen.
         """
-        user_id, session_id = test_app.setup_user()
+        agent_id, session_id = test_app.setup_agent()
 
         # Configure LLM to use write_memory tool
         test_app.stub_llm_responses(
@@ -110,14 +110,14 @@ class TestE2EHTTPChat:
         )
 
         # Client sends request
-        events = test_app.chat(user_id, session_id, "Remember I prefer dark mode")
+        events = test_app.chat(agent_id, session_id, "Remember I prefer dark mode")
 
         # Request completed successfully
         done_events = [e for e in events if e["event"] == "done"]
         assert len(done_events) == 1
 
         # E2E verification: memory contains the written content
-        content = test_app.read_memory(user_id, "current_session")
+        content = test_app.read_memory(agent_id, "current_session")
         assert "dark mode" in content
 
         test_app.reset_llm()
@@ -132,11 +132,11 @@ class TestE2EHTTPChat:
         We can't verify the response content (mock is predetermined),
         but we verify the flow completes without error.
         """
-        user_id, session_id = test_app.setup_user()
+        agent_id, session_id = test_app.setup_agent()
 
         # Pre-populate memory with content
         test_app.write_memory(
-            user_id, "current_session", "# Session\n\nWorking on PROJECT_ALPHA."
+            agent_id, "current_session", "# Session\n\nWorking on PROJECT_ALPHA."
         )
 
         # Configure LLM to use read_memory tool
@@ -161,7 +161,7 @@ class TestE2EHTTPChat:
         )
 
         # Client sends request
-        events = test_app.chat(user_id, session_id, "What am I working on?")
+        events = test_app.chat(agent_id, session_id, "What am I working on?")
 
         # Request completed successfully (tool execution worked)
         done_events = [e for e in events if e["event"] == "done"]
@@ -178,7 +178,7 @@ class TestE2EHTTPChat:
         This tests the safety mechanism from client perspective:
         even if something goes wrong, client gets a response.
         """
-        user_id, session_id = test_app.setup_user()
+        agent_id, session_id = test_app.setup_agent()
 
         # Configure LLM to always request tool use (infinite loop scenario)
         tool_loop_response = LLMResponseSpec(
@@ -199,7 +199,7 @@ class TestE2EHTTPChat:
         )
 
         # Client sends request
-        events = test_app.chat(user_id, session_id, "Help me")
+        events = test_app.chat(agent_id, session_id, "Help me")
 
         # Request completed (agent stopped at max iterations)
         done_events = [e for e in events if e["event"] == "done"]
@@ -213,7 +213,7 @@ class TestE2EHTTPChat:
         When: Agent processes with two-phase approach (ReAct loop then structure output)
         Then: Client receives SSE stream with response event containing JSON data
         """
-        user_id, session_id = test_app.setup_user()
+        agent_id, session_id = test_app.setup_agent()
 
         # Configure LLM responses for two-phase flow
         test_app.stub_llm_responses(
@@ -243,7 +243,7 @@ class TestE2EHTTPChat:
 
         # Client sends request with output_format
         events = test_app.chat(
-            user_id,
+            agent_id,
             session_id,
             "Extract contact: John ([email protected])",
             output_format,
@@ -280,7 +280,7 @@ class TestE2EHTTPChat:
         Then: Client receives 401 Unauthorized
         """
         response = test_app.chat_raw(
-            user_id="any",
+            agent_id="any",
             session_id="any",
             message="hello",
             api_key=None,
@@ -294,7 +294,7 @@ class TestE2EHTTPChat:
         Then: Client receives 401 Unauthorized
         """
         response = test_app.chat_raw(
-            user_id="any",
+            agent_id="any",
             session_id="any",
             message="hello",
             api_key="wrong-key",
@@ -309,11 +309,11 @@ class TestE2EHTTPChat:
 
         This E2E test exercises list_memory_keys on the storage adapter.
         """
-        user_id, session_id = test_app.setup_user()
+        agent_id, session_id = test_app.setup_agent()
 
         # Pre-populate memory with multiple keys
-        test_app.write_memory(user_id, "current_session", "# Session")
-        test_app.write_memory(user_id, "notes", "# Notes")
+        test_app.write_memory(agent_id, "current_session", "# Session")
+        test_app.write_memory(agent_id, "notes", "# Notes")
 
         # Configure LLM to use list_memory_keys tool
         test_app.stub_llm_responses(
@@ -335,7 +335,7 @@ class TestE2EHTTPChat:
         )
 
         # Client sends request
-        events = test_app.chat(user_id, session_id, "What memory keys do I have?")
+        events = test_app.chat(agent_id, session_id, "What memory keys do I have?")
 
         # Request completed successfully (tool execution worked)
         done_events = [e for e in events if e["event"] == "done"]
@@ -351,7 +351,7 @@ class TestE2EHTTPChat:
 
         The client doesn't know about iterations - it just gets a response.
         """
-        user_id, session_id = test_app.setup_user()
+        agent_id, session_id = test_app.setup_agent()
 
         test_app.stub_llm_responses(
             LLMResponseSpec(stop_reason="end_turn", content="Working on it."),
@@ -362,7 +362,7 @@ class TestE2EHTTPChat:
             iterations=2,
         )
 
-        events = test_app.chat(user_id, session_id, "Help me with something complex")
+        events = test_app.chat(agent_id, session_id, "Help me with something complex")
 
         response_events = [e for e in events if e["event"] == "response"]
         done_events = [e for e in events if e["event"] == "done"]
@@ -381,7 +381,7 @@ class TestE2EHTTPChat:
         Safety mechanism: even if something goes wrong internally,
         the client always gets a response.
         """
-        user_id, session_id = test_app.setup_user()
+        agent_id, session_id = test_app.setup_agent()
 
         # iterations=4 exceeds max_outer_iterations (3), so validation
         # never passes within the limit - tests the safety exit
@@ -394,7 +394,7 @@ class TestE2EHTTPChat:
             iterations=4,
         )
 
-        events = test_app.chat(user_id, session_id, "This is tricky")
+        events = test_app.chat(agent_id, session_id, "This is tricky")
 
         done_events = [e for e in events if e["event"] == "done"]
         assert len(done_events) == 1
@@ -411,8 +411,8 @@ def test_list_memory_keys_for_nonexistent_user(memory_service):
     """
     import uuid
 
-    user_id = f"nonexistent_user_{uuid.uuid4().hex[:8]}"
+    agent_id = f"nonexistent_user_{uuid.uuid4().hex[:8]}"
 
-    keys = memory_service.list_memory_keys(user_id=user_id)
+    keys = memory_service.list_memory_keys(agent_id=agent_id)
 
     assert keys == []

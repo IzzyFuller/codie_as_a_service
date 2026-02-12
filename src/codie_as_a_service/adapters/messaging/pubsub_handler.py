@@ -39,7 +39,7 @@ class AgentMessageHandler:
         Initialize message handler.
 
         Args:
-            memory_service: Service for reading/writing user memory
+            memory_service: Service for reading/writing agent memory
             llm_adapter: OpenAI-compatible LLM adapter
             prompt_adapter: File-based prompt adapter
             prompt_names: List of prompt names to fetch and combine for system prompt
@@ -67,7 +67,7 @@ class AgentMessageHandler:
         # Process request through orchestrator
         try:
             result = self._orchestrator.run(
-                user_id=request.user_id,
+                agent_id=request.agent_id,
                 instruction=request.message,
                 tool_executor=self._tool_executor,
                 output_format=request.output_format,
@@ -82,7 +82,7 @@ class AgentMessageHandler:
 
         # Create response
         response = AgentResponse(
-            user_id=request.user_id,
+            agent_id=request.agent_id,
             session_id=request.session_id,
             response_data=response_data,
             status=status,

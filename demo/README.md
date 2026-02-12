@@ -4,7 +4,7 @@ Two demo options:
 1. **HTTP Streaming** - Gradio chat UI with SSE streaming responses
 2. **Pub/Sub Message-Driven** - CLI client with async message processing via RabbitMQ
 
-Both demonstrate per-user memory persistence.
+Both demonstrate per-agent memory persistence.
 
 ## Prerequisites
 
@@ -44,7 +44,7 @@ This single command:
 1. Starts GCS emulator (Docker container)
 2. Starts RabbitMQ (Docker container)
 3. Creates queues and exchanges
-4. Creates demo user
+4. Creates demo agent
 5. Starts the RabbitMQ agent service
 6. Launches CLI client
 
@@ -77,13 +77,13 @@ GCS_BUCKET_NAME=deep-agent-memory
 ## Demo Features
 
 - **Streaming responses**: Watch the agent think in real-time
-- **Per-user memory**: Each user_id gets isolated memory storage
+- **Per-user memory**: Each agent_id gets isolated memory storage
 - **Session persistence**: Memory persists across conversations for the same user
 - **API key authentication**: HTTP endpoint protected by X-API-Key header
 
 ## Testing Memory Persistence
 
-1. Chat with the agent using default user ID
+1. Chat with the agent using default agent ID
 2. Tell it something memorable (e.g., "My favorite color is blue")
 3. Close the chat and reopen
 4. Ask "What's my favorite color?" - it should remember
@@ -124,7 +124,7 @@ User Browser (localhost:7860)
        ├──▶ Local LLM (Transformers)
        │
        └──▶ GCS Emulator (localhost:4443)
-            └── users/{user_id}/*.md
+            └── agents/{agent_id}/*.md
 ```
 
 ### Pub/Sub Message-Driven (Option 2)
@@ -146,7 +146,7 @@ User Browser (localhost:7860)
        ├──▶ Local LLM (Transformers)
        │
        ├──▶ GCS Emulator (localhost:4443)
-       │         └── users/{user_id}/*.md
+       │         └── agents/{agent_id}/*.md
        │
        │ publish response
        ▼

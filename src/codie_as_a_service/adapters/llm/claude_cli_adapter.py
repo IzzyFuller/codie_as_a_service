@@ -7,6 +7,7 @@ Disables built-in tools and passes custom tool definitions via system prompt.
 
 import json
 import logging
+import os
 import re
 import subprocess
 from typing import Any
@@ -38,6 +39,7 @@ class ClaudeCliAdapter:
         system_prompt: str,
         tools: list[ToolDefinition] | None = None,
         output_format: dict[str, Any] | None = None,
+        max_new_tokens: int | None = None,
     ) -> LLMResponse:
         """
         Call Claude CLI with messages and optional tools.
@@ -47,6 +49,7 @@ class ClaudeCliAdapter:
             system_prompt: System prompt for the agent
             tools: Optional tool definitions (appended to system prompt)
             output_format: Optional JSON Schema for structured output (--json-schema)
+            max_new_tokens: Ignored (Claude CLI manages token limits internally)
 
         Returns:
             Structured LLMResponse
@@ -167,7 +170,7 @@ When you have a final answer and don't need any tools, respond with plain text.
             input=prompt,
             capture_output=True,
             text=True,
-            timeout=120,
+            timeout=int(os.environ.get("LLM_TIMEOUT", "300")),
         )
 
         logger.debug("Claude CLI exit code: %d", result.returncode)
@@ -197,8 +200,15 @@ When you have a final answer and don't need any tools, respond with plain text.
                 f"Claude CLI error: {response.get('result', 'Unknown error')}"
             )
 
-        result = response.get("result", "")
         logger.debug("Raw Claude JSON keys: %s", list(response.keys()))
+
+        # --json-schema puts structured data in a separate field (as a dict)
+        if json_schema is not None and "structured_output" in response:
+            result = json.dumps(response["structured_output"])
+            logger.debug("Structured output: %r", result[:500])
+            return result
+
+        result = response.get("result", "")
         logger.debug("Raw result value: %r", result[:500] if result else result)
         return result
 

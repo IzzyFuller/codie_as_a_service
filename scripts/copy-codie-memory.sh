@@ -2,14 +2,14 @@
 # Copy memory entities into GCS emulator for a specified user
 #
 # Usage:
-#   ./scripts/copy-codie-memory.sh [user_id]
+#   ./scripts/copy-codie-memory.sh [agent_id]
 #
 # Environment variables:
 #   CODIE_MEMORY_PATH: Path to local memory directory (required)
 
 set -e
 
-USER_ID="${1:-demo-user}"
+AGENT_ID="${1:-demo-user}"
 
 if [ -z "$CODIE_MEMORY_PATH" ]; then
     echo "ERROR: CODIE_MEMORY_PATH environment variable is required"
@@ -22,7 +22,7 @@ GCS_EMULATOR_PORT=${GCS_EMULATOR_PORT:-4443}
 GCS_BUCKET_NAME=${GCS_BUCKET_NAME:-"deep-agent-memory"}
 GCS_URL="http://localhost:${GCS_EMULATOR_PORT}"
 
-echo "=== Copying Codie's Memory to User: $USER_ID ==="
+echo "=== Copying Codie's Memory to Agent: $AGENT_ID ==="
 echo ""
 
 # Check if emulator is running
@@ -41,7 +41,7 @@ fi
 upload_file() {
     local key=$1
     local source_file=$2
-    local blob_path="users/${USER_ID}/${key}.md"
+    local blob_path="agents/${AGENT_ID}/${key}.md"
 
     if [ ! -f "$source_file" ]; then
         echo "  SKIP: $source_file (not found)"
@@ -64,12 +64,12 @@ upload_file "current_session" "${CODIE_MEMORY_DIR}/current_session.md"
 
 echo ""
 echo "=== Codie's Memory Copied Successfully ==="
-echo "User ID: $USER_ID"
+echo "Agent ID: $AGENT_ID"
 echo "Memory files:"
-echo "  - users/${USER_ID}/me.md"
-echo "  - users/${USER_ID}/context_anchors.md"
-echo "  - users/${USER_ID}/current_session.md"
+echo "  - agents/${AGENT_ID}/me.md"
+echo "  - agents/${AGENT_ID}/context_anchors.md"
+echo "  - agents/${AGENT_ID}/current_session.md"
 echo ""
 echo "Test with Gradio demo:"
 echo "  ./demo/run-http-demo.sh"
-echo "  Then use user_id: ${USER_ID}"
+echo "  Then use agent_id: ${AGENT_ID}"

@@ -15,7 +15,8 @@ import httpx
 # Configuration
 API_BASE_URL = os.environ.get("DEEP_AGENT_API_URL", "http://localhost:8080")
 API_KEY = os.environ.get("API_KEY", "")
-DEFAULT_USER_ID = os.environ.get("DEMO_USER_ID", "demo-user")
+DEFAULT_AGENT_ID = os.environ.get("DEMO_AGENT_ID", "demo-user")
+LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "300"))
 
 
 def parse_sse_events(response: httpx.Response):
@@ -36,18 +37,18 @@ def parse_sse_events(response: httpx.Response):
                 yield current_event, data
 
 
-def chat(message: str, history: list[dict], user_id: str):
+def chat(message: str, history: list[dict], agent_id: str):
     """Send message to agent and stream response."""
     session_id = str(uuid.uuid4())
 
-    with httpx.Client(timeout=120.0) as client:
+    with httpx.Client(timeout=float(LLM_TIMEOUT)) as client:
         headers = {"X-API-Key": API_KEY} if API_KEY else {}
         with client.stream(
             "POST",
             f"{API_BASE_URL}/chat",
             headers=headers,
             json={
-                "user_id": user_id or DEFAULT_USER_ID,
+                "agent_id": agent_id or DEFAULT_AGENT_ID,
                 "session_id": session_id,
                 "message": message,
             },
@@ -73,15 +74,15 @@ def create_demo() -> gr.Blocks:
         gr.Markdown("# Deep Agent Service Demo")
         gr.Markdown("Chat with the deep agent. Responses stream in real-time.")
 
-        user_id_input = gr.Textbox(
-            label="User ID",
-            value=DEFAULT_USER_ID,
-            placeholder="Enter user ID",
+        agent_id_input = gr.Textbox(
+            label="Agent ID",
+            value=DEFAULT_AGENT_ID,
+            placeholder="Enter agent ID",
         )
 
         gr.ChatInterface(
             fn=chat,
-            additional_inputs=[user_id_input],
+            additional_inputs=[agent_id_input],
             title=None,
             examples=[
                 ["Hello, who are you?"],

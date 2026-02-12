@@ -5,11 +5,11 @@
 ![Python](https://img.shields.io/badge/python-3.13-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-Microservice for per-user agent identity and memory - a prototype for "Codie-as-a-Service".
+Microservice for per-agent agent identity and memory - a prototype for "Codie-as-a-Service".
 
 ## Overview
 
-A standalone microservice that enables per-user agent identity and memory isolation. Each user gets their own memory space, enabling personalized AI agents at scale.
+A standalone microservice that enables per-agent agent identity and memory isolation. Each agent gets their own memory space, enabling personalized AI agents at scale.
 
 ## Architecture
 
@@ -21,7 +21,7 @@ codie_as_a_service/
 │   ├── core/                  # Domain layer (models, protocols)
 │   ├── services/              # Business logic layer
 │   │   ├── agent/            # ReAct agent implementation
-│   │   ├── memory/           # User memory management
+│   │   ├── memory/           # Agent memory management
 │   │   └── tools/            # Agent tool system
 │   ├── adapters/             # Infrastructure layer
 │   │   ├── auth/             # Authentication adapters
@@ -65,7 +65,7 @@ codie_as_a_service/
 
 ### ✅ In Scope (Minimal Viable Feature Set)
 
-1. **User Identity & Isolation**: Each user gets unique `user_id` with isolated memory
+1. **Agent Identity & Isolation**: Each agent gets unique `agent_id` with isolated memory
 2. **Basic Memory System**:
    - `current_session.md` - Working memory for active conversation
    - `context_anchors.md` - Priority-ranked current context
@@ -142,7 +142,7 @@ cp .env.example .env
 ```
 
 This starts the service with:
-- **Storage**: Local filesystem (`./data/users/`)
+- **Storage**: Local filesystem (`./data/agents/`)
 - **LLM**: Claude Code CLI (uses your installed `claude` command)
 - **API**: http://localhost:8080
 
@@ -152,7 +152,7 @@ This starts the service with:
 curl -X POST http://localhost:8080/chat \
   -H "Content-Type: application/json" \
   -H "X-API-Key: local-dev-key" \
-  -d '{"user_id": "test", "session_id": "1", "message": "Hello!"}' \
+  -d '{"agent_id": "test", "session_id": "1", "message": "Hello!"}' \
   --no-buffer
 ```
 
@@ -172,7 +172,7 @@ uv run --group demo python demo/app.py
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `STORAGE_ADAPTER` | `gcs` | `local` or `gcs` |
-| `STORAGE_DIR` | `./data/users` | Path for local storage |
+| `STORAGE_DIR` | `./data/agents` | Path for local storage |
 | `LLM_ADAPTER` | `claude_cli` | `claude_cli` or `local` |
 | `MODEL_NAME` | - | HuggingFace model (when `LLM_ADAPTER=local`) |
 | `DEVICE` | `mps` | `mps`, `cuda`, or `cpu` (when `LLM_ADAPTER=local`) |
@@ -207,7 +207,7 @@ The service exposes a streaming chat endpoint using Server-Sent Events (SSE):
 **Request:**
 ```json
 {
-  "user_id": "demo-user",
+  "agent_id": "demo-user",
   "session_id": "unique-session-id",
   "message": "Hello, who are you?"
 }
@@ -224,7 +224,7 @@ The service exposes a streaming chat endpoint using Server-Sent Events (SSE):
 curl -X POST http://localhost:8080/chat \
   -H "Content-Type: application/json" \
   -H "X-API-Key: your-api-key" \
-  -d '{"user_id": "demo-user", "session_id": "test", "message": "Hello!"}' \
+  -d '{"agent_id": "demo-user", "session_id": "test", "message": "Hello!"}' \
   --no-buffer
 ```
 
@@ -234,7 +234,7 @@ Note: The `/chat` endpoint requires authentication via `X-API-Key` header. The `
 
 The demo includes a web interface for interactive testing:
 - Real-time streaming responses
-- User ID switching (test different memory contexts)
+- Agent ID switching (test different memory contexts)
 - Conversation history display
 
 ### Memory Sync Scripts
@@ -289,12 +289,12 @@ uv run mypy src/
 
 ## Memory Structure
 
-Each user gets isolated memory in GCS:
+Each agent gets isolated memory in GCS:
 
 ```
 gs://deep-agent-memory-{env}/
-└── users/
-    └── {user_id}/
+└── agents/
+    └── {agent_id}/
         ├── current_session.md       # Working memory
         ├── context_anchors.md       # Priority context
         └── conversations/

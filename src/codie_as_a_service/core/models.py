@@ -91,9 +91,11 @@ class LLMResponse(BaseModel):
 
 
 class RunAgentRequest(BaseModel):
-    """Request to run the agent for a user, delivered via Pub/Sub."""
+    """Request to run the agent, delivered via Pub/Sub."""
 
-    user_id: str = Field(..., description="User identifier for memory isolation")
+    agent_id: str = Field(
+        ..., description="Agent identifier for agent memory isolation"
+    )
     session_id: str = Field(
         ..., description="Session identifier for conversation continuity"
     )
@@ -106,7 +108,7 @@ class RunAgentRequest(BaseModel):
 class AgentResponse(BaseModel):
     """Response from agent processing, published back to Pub/Sub."""
 
-    user_id: str = Field(..., description="User identifier this response is for")
+    agent_id: str = Field(..., description="Agent identifier for this response")
     session_id: str = Field(
         ..., description="Session identifier for conversation continuity"
     )

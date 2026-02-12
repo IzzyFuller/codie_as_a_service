@@ -6,10 +6,10 @@
 #   - .env file configured (or use defaults below)
 #
 # Usage:
-#   ./scripts/start-local-http.sh [user_id]
+#   ./scripts/start-local-http.sh [agent_id]
 #
 # Arguments:
-#   user_id    Optional user to create if not exists (creates minimal memory)
+#   agent_id    Optional agent to create if not exists (creates minimal memory)
 
 set -e
 
@@ -25,7 +25,7 @@ fi
 
 # Set defaults for local mode
 export STORAGE_ADAPTER=${STORAGE_ADAPTER:-local}
-export STORAGE_DIR=${STORAGE_DIR:-./data/users}
+export STORAGE_DIR=${STORAGE_DIR:-./data/agents}
 export LLM_ADAPTER=${LLM_ADAPTER:-claude_cli}
 export HTTP_HOST=${HTTP_HOST:-0.0.0.0}
 export HTTP_PORT=${HTTP_PORT:-8080}
@@ -36,18 +36,18 @@ export API_KEY=${API_KEY:-local-dev-key}
 # Create storage directory if needed
 mkdir -p "$STORAGE_DIR"
 
-# Create user if specified
+# Create agent if specified
 if [ -n "$1" ]; then
-    USER_DIR="$STORAGE_DIR/$1"
-    if [ ! -d "$USER_DIR" ]; then
-        echo "Creating user: $1"
-        mkdir -p "$USER_DIR"
-        echo "# Identity" > "$USER_DIR/me.md"
-        echo "# Context Anchors" > "$USER_DIR/context_anchors.md"
-        echo "# Current Session" > "$USER_DIR/current_session.md"
-        echo "User $1 created with minimal memory."
+    AGENT_DIR="$STORAGE_DIR/$1"
+    if [ ! -d "$AGENT_DIR" ]; then
+        echo "Creating agent: $1"
+        mkdir -p "$AGENT_DIR"
+        echo "# Identity" > "$AGENT_DIR/me.md"
+        echo "# Context Anchors" > "$AGENT_DIR/context_anchors.md"
+        echo "# Current Session" > "$AGENT_DIR/current_session.md"
+        echo "Agent $1 created with minimal memory."
     else
-        echo "User $1 already exists."
+        echo "Agent $1 already exists."
     fi
 fi
 
@@ -65,7 +65,7 @@ echo "  Test with:"
 echo "    curl -X POST http://localhost:$HTTP_PORT/chat \\"
 echo "      -H 'Content-Type: application/json' \\"
 echo "      -H 'X-API-Key: $API_KEY' \\"
-echo "      -d '{\"user_id\": \"test\", \"session_id\": \"1\", \"message\": \"Hello!\"}'"
+echo "      -d '{\"agent_id\": \"test\", \"session_id\": \"1\", \"message\": \"Hello!\"}'"
 echo ""
 echo "  Press Ctrl+C to stop"
 echo "==========================================="

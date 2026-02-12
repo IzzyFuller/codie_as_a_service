@@ -31,7 +31,7 @@ class PubSubDemoClient:
     def __init__(self):
         self._publisher = pubsub_v1.PublisherClient()
         self._subscriber = pubsub_v1.SubscriberClient()
-        self._user_id = os.environ.get("DEMO_USER_ID", "demo-user")
+        self._agent_id = os.environ.get("DEMO_AGENT_ID", "demo-user")
         self._session_id = str(uuid.uuid4())
 
     def send_message(
@@ -39,7 +39,7 @@ class PubSubDemoClient:
     ) -> AgentResponse | None:
         """Send a message and wait for response."""
         request = RunAgentRequest(
-            user_id=self._user_id,
+            agent_id=self._agent_id,
             session_id=self._session_id,
             message=message,
         )
@@ -84,12 +84,12 @@ class PubSubDemoClient:
         return None
 
     @property
-    def user_id(self) -> str:
-        return self._user_id
+    def agent_id(self) -> str:
+        return self._agent_id
 
-    @user_id.setter
-    def user_id(self, value: str):
-        self._user_id = value
+    @agent_id.setter
+    def agent_id(self, value: str):
+        self._agent_id = value
 
 
 def main():
@@ -99,13 +99,13 @@ def main():
     print("=" * 60)
     print()
     print("Commands:")
-    print("  /user <id>  - Switch user ID")
+    print("  /agent <id>  - Switch agent ID")
     print("  /quit       - Exit")
     print("  <message>   - Send message to agent")
     print()
 
     client = PubSubDemoClient()
-    print(f"User ID: {client.user_id}")
+    print(f"Agent ID: {client.agent_id}")
     print()
 
     while True:
@@ -119,11 +119,11 @@ def main():
                 print("Goodbye!")
                 break
 
-            if user_input.startswith("/user "):
+            if user_input.startswith("/agent "):
                 new_user = user_input[6:].strip()
                 if new_user:
-                    client.user_id = new_user
-                    print(f"  Switched to user: {new_user}")
+                    client.agent_id = new_user
+                    print(f"  Switched to agent: {new_user}")
                 continue
 
             # Send message and get response

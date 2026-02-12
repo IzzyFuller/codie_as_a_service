@@ -73,3 +73,6 @@ demo/demo.env
 
 # Local storage data
 data/
+
+# Local model weights
+mlx_model/

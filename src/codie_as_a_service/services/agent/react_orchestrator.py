@@ -51,7 +51,7 @@ class ReActOrchestrator:
 
     def run(
         self,
-        user_id: str,
+        agent_id: str,
         instruction: str,
         tool_executor: ToolExecutor,
         output_format: dict[str, Any] | None = None,
@@ -61,14 +61,14 @@ class ReActOrchestrator:
 
         Returns structured dict matching output_format schema.
         """
-        # Load identity context for this user
+        # Load identity context for this agent
         identity = self._memory.get_identity_context(
-            user_id=user_id, session_lines=self._session_lines
+            agent_id=agent_id, session_lines=self._session_lines
         )
         if not identity.me:
-            raise ValueError(f"No assistant identity configured for user '{user_id}'")
+            raise ValueError(f"No assistant identity configured for agent '{agent_id}'")
 
-        context = OrchestrationContext(user_id=user_id, instruction=instruction)
+        context = OrchestrationContext(agent_id=agent_id, instruction=instruction)
 
         for iteration in range(self._max_outer_iterations):
             context.iteration = iteration
@@ -121,8 +121,9 @@ class ReActOrchestrator:
                 messages=messages,
                 tools=phase.tools,
                 tool_executor=tool_executor,
-                user_id=context.user_id,
+                agent_id=context.agent_id,
                 max_iterations=phase.max_iterations,
+                max_new_tokens=phase.max_new_tokens,
             )
             try:
                 return self._parse_phase_output(text_result, phase.output_schema)
@@ -140,6 +141,7 @@ class ReActOrchestrator:
                 system_prompt=phase.system_prompt,
                 tools=None,
                 output_format=output_format,
+                max_new_tokens=phase.max_new_tokens,
             )
 
             text_parts = []

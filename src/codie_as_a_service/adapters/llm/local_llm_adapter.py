@@ -11,6 +11,7 @@ import re
 from typing import Any
 
 from mlx_lm import generate, load
+from mlx_lm.sample_utils import make_sampler
 
 from codie_as_a_service.core.models import (
     ContentBlock,
@@ -86,19 +87,40 @@ class LocalLLMAdapter:
         effective_max_tokens = max_new_tokens or self.DEFAULT_MAX_NEW_TOKENS
         logger.info("Generating (max_new_tokens=%d)", effective_max_tokens)
 
-        text = self._generate(prompt, effective_max_tokens)
+        json_schema = None
+        if output_format and output_format.get("type") == "json_schema":
+            json_schema = output_format["schema"]
+
+        text = self._generate(prompt, effective_max_tokens, json_schema=json_schema)
 
         return self._parse_response(text)
 
-    def _generate(self, prompt: str, max_tokens: int) -> str:  # pragma: no cover
-        """Generate text from prompt using MLX."""
+    def _generate(  # pragma: no cover
+        self, prompt: str, max_tokens: int, *, json_schema: dict | None = None
+    ) -> str:
+        """Generate text from prompt using MLX.
+
+        When json_schema is provided, uses Outlines to constrain generation
+        to valid JSON matching the schema.
+        """
+        sampler = make_sampler(temp=0.6, top_p=0.95)
+        if json_schema is not None:
+            from outlines import from_mlxlm
+            from outlines import json_schema as outlines_json_schema
+
+            outlines_model = from_mlxlm(self._model, self._tokenizer)
+            return outlines_model(
+                prompt,
+                output_type=outlines_json_schema(json_schema),
+                max_tokens=max_tokens,
+                sampler=sampler,
+            )
         return generate(
             self._model,
             self._tokenizer,
             prompt=prompt,
             max_tokens=max_tokens,
-            temp=0.6,
-            top_p=0.95,
+            sampler=sampler,
         )
 
     def _prepare_messages(

@@ -78,11 +78,13 @@ class ReActOrchestrator:
                 context.phase_outputs[phase.name] = result.model_dump()
 
                 # Declarative merge from PhaseDefinition fields
-                if phase.sets_identity_from:
+                # hasattr guards handle fallback to ProcessResult when
+                # a phase's tool loop output can't be parsed as its schema
+                if phase.sets_identity_from and hasattr(result, phase.sets_identity_from):
                     context.identity_summary = getattr(result, phase.sets_identity_from)
-                if phase.sets_response_from:
+                if phase.sets_response_from and hasattr(result, phase.sets_response_from):
                     context.response = getattr(result, phase.sets_response_from)
-                if phase.sets_done_from:
+                if phase.sets_done_from and hasattr(result, phase.sets_done_from):
                     context.done = getattr(result, phase.sets_done_from)
 
                 if phase.completes_request and context.done:

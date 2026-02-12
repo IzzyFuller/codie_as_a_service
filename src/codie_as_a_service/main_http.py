@@ -100,7 +100,6 @@ def create_app(
             'Example: {"response": "Hello!"}'
         ),
         output_schema=ProcessResult,
-        max_new_tokens=512,
     )
     orchestrator = ReActOrchestrator(
         react_agent=agent,
@@ -226,7 +225,6 @@ def _build_orchestrator_phases(
             tools=[],
             output_schema=HydratedIdentity,
             max_iterations=1,
-            max_new_tokens=512,
         ),
         PhaseDefinition(
             name="extend",
@@ -234,7 +232,6 @@ def _build_orchestrator_phases(
             tools=tools,
             output_schema=ExtendedInstruction,
             max_iterations=5,
-            max_new_tokens=1024,
         ),
         PhaseDefinition(
             name="process",
@@ -242,7 +239,6 @@ def _build_orchestrator_phases(
             tools=tools,
             output_schema=ProcessResult,
             max_iterations=10,
-            max_new_tokens=2048,
         ),
         PhaseDefinition(
             name="validate",
@@ -251,7 +247,6 @@ def _build_orchestrator_phases(
             output_schema=ValidationResult,
             max_iterations=1,
             completes_request=True,
-            max_new_tokens=256,
         ),
         PhaseDefinition(
             name="synthesize",
@@ -259,7 +254,6 @@ def _build_orchestrator_phases(
             tools=tools,
             output_schema=SynthesisResult,
             max_iterations=5,
-            max_new_tokens=1024,
         ),
     ]
 

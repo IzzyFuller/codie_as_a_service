@@ -166,16 +166,26 @@ class ReActOrchestrator:
             f"Content:\n{content}"
         )
 
+        # Use format phase's own schema when caller doesn't provide one
+        if output_format is None and self._format_phase.output_schema is not None:
+            output_format = {
+                "type": "json_schema",
+                "schema": self._format_phase.output_schema.model_json_schema(),
+            }
+
+        logger.info("Phase format starting")
         messages = [Message(role="user", content=format_input)]
         response = self._llm.call(
             messages=messages,
             system_prompt=self._format_phase.system_prompt,
             tools=None,
             output_format=output_format,
+            max_new_tokens=self._format_phase.max_new_tokens,
         )
 
         for block in response.content:
             if isinstance(block, ContentBlock):
+                logger.info("Phase format got LLM response: %.200s", block.text)
                 return json.loads(block.text)
 
     def _build_phase_input(

@@ -99,7 +99,8 @@ def create_app(
             "You are a JSON formatter. Return ONLY valid JSON, no other text. "
             'Example: {"response": "Hello!"}'
         ),
-        output_schema=ProcessResult,  # Not used for FORMAT
+        output_schema=ProcessResult,
+        max_new_tokens=512,
     )
     orchestrator = ReActOrchestrator(
         react_agent=agent,

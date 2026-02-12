@@ -12,7 +12,6 @@ from unittest.mock import MagicMock, patch
 
 import pika
 import pytest
-import torch
 from google.cloud import firestore, storage
 
 from starlette.testclient import TestClient as StarletteTestClient
@@ -357,32 +356,16 @@ def pubsub_memory_service(gcs_bucket):
 
 
 def create_local_llm_adapter():
-    """Create LocalLLMAdapter with mocked model and tokenizer."""
+    """Create LocalLLMAdapter with mocked MLX model loading and generation."""
     mock_tokenizer = MagicMock()
     mock_model = MagicMock()
 
-    mock_tokenizer.apply_chat_template.return_value = {
-        "input_ids": torch.tensor([[1, 2, 3]]),
-        "attention_mask": torch.tensor([[1, 1, 1]]),
-    }
-    mock_tokenizer.eos_token_id = 0
-    mock_tokenizer.decode.return_value = "I'm ready to help you."
+    with patch("codie_as_a_service.adapters.llm.local_llm_adapter.load") as mock_load:
+        mock_load.return_value = (mock_model, mock_tokenizer)
+        adapter = LocalLLMAdapter(model_name="test-model")
 
-    mock_model.generate.return_value = torch.tensor([[1, 2, 3, 4, 5, 6]])
-    mock_model.to.return_value = mock_model
-
-    with (
-        patch(
-            "codie_as_a_service.adapters.llm.local_llm_adapter.AutoTokenizer"
-        ) as mock_auto_tok,
-        patch(
-            "codie_as_a_service.adapters.llm.local_llm_adapter.AutoModelForCausalLM"
-        ) as mock_auto_model,
-    ):
-        mock_auto_tok.from_pretrained.return_value = mock_tokenizer
-        mock_auto_model.from_pretrained.return_value = mock_model
-
-        adapter = LocalLLMAdapter(model_name="test-model", device="cpu")
+    # Mock _generate directly - bypasses mlx_lm.generate
+    adapter._generate = MagicMock(return_value="I'm ready to help you.")
 
     return adapter
 
@@ -514,7 +497,7 @@ class TestClient:
 
     def send_request(
         self,
-        user_id: str,
+        agent_id: str,
         session_id: str,
         message: str,
         output_format: dict | None = None,
@@ -522,7 +505,7 @@ class TestClient:
     ):
         """Publish request and wait for response."""
         request = RunAgentRequest(
-            user_id=user_id,
+            agent_id=agent_id,
             session_id=session_id,
             message=message,
             output_format=output_format,
@@ -584,7 +567,7 @@ def file_prompt_adapter():
     # Orchestrator phase prompts use {{}} for JSON examples (escaped for .format())
     test_prompts = {
         "codie_as_a_service_system.txt": (
-            "You are a helpful AI assistant with access to user memory. "
+            "You are a helpful AI assistant with access to agent memory. "
             "Identity: {me}. Context: {context_anchors}. Session: {current_session}. "
             "You can read and write to the user's memory using the provided tools."
         ),
@@ -629,7 +612,7 @@ def file_prompt_adapter():
 
 
 @pytest.fixture
-def test_user_id() -> str:
+def test_agent_id() -> str:
     """Provide consistent test user ID."""
     return "test_user_123"
 
@@ -701,14 +684,14 @@ class HTTPTestClient:
 
     def chat_raw(
         self,
-        user_id: str,
+        agent_id: str,
         session_id: str,
         message: str,
         api_key: str | None,
         output_format: dict | None = None,
     ):
         """POST to /chat and return raw response (for testing auth)."""
-        payload = {"user_id": user_id, "session_id": session_id, "message": message}
+        payload = {"agent_id": agent_id, "session_id": session_id, "message": message}
         if output_format:
             payload["output_format"] = output_format
         headers = {}
@@ -718,14 +701,14 @@ class HTTPTestClient:
 
     def chat(
         self,
-        user_id: str,
+        agent_id: str,
         session_id: str,
         message: str,
         output_format: dict | None = None,
     ) -> list[dict]:
         """POST to /chat and collect SSE events (uses configured API key)."""
         response = self.chat_raw(
-            user_id, session_id, message, self._api_key, output_format
+            agent_id, session_id, message, self._api_key, output_format
         )
 
         # Parse SSE response
@@ -774,7 +757,7 @@ class TestApp:
             LLMResponseSpec(stop_reason="end_turn", content="I'm ready to help you.")
         )
 
-    def setup_user(
+    def setup_agent(
         self,
         memory: dict[str, str] | None = None,
     ) -> tuple[str, str]:
@@ -786,9 +769,9 @@ class TestApp:
                    Defaults to minimal identity if not provided.
 
         Returns:
-            Tuple of (user_id, session_id)
+            Tuple of (agent_id, session_id)
         """
-        user_id = str(uuid.uuid4())
+        agent_id = str(uuid.uuid4())
         session_id = str(uuid.uuid4())
 
         # Default minimal memory if not specified
@@ -800,9 +783,11 @@ class TestApp:
             }
 
         for key, content in memory.items():
-            self._memory_service.write_memory(user_id=user_id, key=key, content=content)
+            self._memory_service.write_memory(
+                agent_id=agent_id, key=key, content=content
+            )
 
-        return user_id, session_id
+        return agent_id, session_id
 
     def stub_llm_responses(
         self, *responses: LLMResponseSpec, iterations: int = 1
@@ -823,8 +808,8 @@ class TestApp:
             # ClaudeCliAdapter: mock _run_claude method
             self._llm_adapter._run_claude.side_effect = adapter_responses
         else:
-            # LocalLLMAdapter: mock tokenizer.decode
-            self._llm_adapter._tokenizer.decode.side_effect = adapter_responses
+            # LocalLLMAdapter: mock _generate method
+            self._llm_adapter._generate.side_effect = adapter_responses
 
     def _wrap_with_phase_defaults(
         self, responses: list[LLMResponseSpec], iterations: int = 1
@@ -890,14 +875,13 @@ class TestApp:
             self._llm_adapter._run_claude.side_effect = None
             self._llm_adapter._run_claude.return_value = self._default_response
         else:
-            # LocalLLMAdapter: reset tokenizer and model mocks
-            self._llm_adapter._tokenizer.decode.side_effect = None
-            self._llm_adapter._tokenizer.decode.return_value = self._default_response
-            self._llm_adapter._model.generate.side_effect = None
+            # LocalLLMAdapter: reset _generate mock
+            self._llm_adapter._generate.side_effect = None
+            self._llm_adapter._generate.return_value = self._default_response
 
     def chat(
         self,
-        user_id: str,
+        agent_id: str,
         session_id: str,
         message: str,
         output_format: dict | None = None,
@@ -906,7 +890,7 @@ class TestApp:
         Make a chat request and return SSE events.
 
         Args:
-            user_id: User identifier
+            agent_id: Agent identifier
             session_id: Session identifier
             message: User message
             output_format: Optional JSON schema for structured output
@@ -914,11 +898,11 @@ class TestApp:
         Returns:
             List of SSE events as dicts with 'event' and 'data' keys
         """
-        return self._http_client.chat(user_id, session_id, message, output_format)
+        return self._http_client.chat(agent_id, session_id, message, output_format)
 
     def chat_raw(
         self,
-        user_id: str,
+        agent_id: str,
         session_id: str,
         message: str,
         api_key: str | None,
@@ -926,24 +910,24 @@ class TestApp:
     ):
         """Make a chat request and return raw response (for auth testing)."""
         return self._http_client.chat_raw(
-            user_id, session_id, message, api_key, output_format
+            agent_id, session_id, message, api_key, output_format
         )
 
     def health(self):
         """GET /health endpoint."""
         return self._http_client.health()
 
-    def read_memory(self, user_id: str, key: str) -> str | None:
-        """Read user memory (for verifying side effects)."""
-        return self._memory_service.read_memory(user_id=user_id, key=key)
+    def read_memory(self, agent_id: str, key: str) -> str | None:
+        """Read agent memory (for verifying side effects)."""
+        return self._memory_service.read_memory(agent_id=agent_id, key=key)
 
-    def write_memory(self, user_id: str, key: str, content: str) -> None:
-        """Write user memory (for test setup)."""
-        self._memory_service.write_memory(user_id=user_id, key=key, content=content)
+    def write_memory(self, agent_id: str, key: str, content: str) -> None:
+        """Write agent memory (for test setup)."""
+        self._memory_service.write_memory(agent_id=agent_id, key=key, content=content)
 
     def send_pubsub_request(
         self,
-        user_id: str,
+        agent_id: str,
         session_id: str,
         message: str,
         output_format: dict | None = None,
@@ -953,7 +937,7 @@ class TestApp:
         Send a Pub/Sub request and wait for response.
 
         Args:
-            user_id: User identifier
+            agent_id: Agent identifier
             session_id: Session identifier
             message: User message
             output_format: Optional JSON schema for structured output
@@ -965,7 +949,7 @@ class TestApp:
         if self._pubsub_client is None:
             raise RuntimeError("TestApp not configured for Pub/Sub tests")
         return self._pubsub_client.send_request(
-            user_id, session_id, message, output_format, timeout_seconds
+            agent_id, session_id, message, output_format, timeout_seconds
         )
 
     def _to_adapter_response(self, spec: LLMResponseSpec) -> str:

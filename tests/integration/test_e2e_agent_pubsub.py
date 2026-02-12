@@ -13,7 +13,6 @@ If we change LLM adapters, only TestApp needs to change - not these tests.
 import time
 
 import pytest
-import torch
 
 from tests.conftest import LLMResponseSpec
 
@@ -28,7 +27,7 @@ class TestE2EAgentPubSub:
         When: Client publishes RunAgentRequest to request topic
         Then: Client receives AgentResponse on response topic
         """
-        user_id, session_id = pubsub_test_app.setup_user()
+        agent_id, session_id = pubsub_test_app.setup_agent()
 
         # Configure LLM responses for two-phase flow
         pubsub_test_app.stub_llm_responses(
@@ -42,11 +41,11 @@ class TestE2EAgentPubSub:
         )
 
         response = pubsub_test_app.send_pubsub_request(
-            user_id, session_id, "Hello, can you help me?"
+            agent_id, session_id, "Hello, can you help me?"
         )
 
         assert response is not None, "Timed out waiting for response"
-        assert response.user_id == user_id
+        assert response.agent_id == agent_id
         assert response.session_id == session_id
         assert response.status == "success"
 
@@ -63,7 +62,7 @@ class TestE2EAgentPubSub:
         )
 
         assert response is not None, "Timed out waiting for response"
-        assert response.user_id == "nonexistent_user"
+        assert response.agent_id == "nonexistent_user"
         assert response.status == "error"
 
     def test_structured_output_returns_response_data(self, pubsub_test_app):
@@ -72,7 +71,7 @@ class TestE2EAgentPubSub:
         When: Agent processes with two-phase approach (ReAct loop then structure output)
         Then: Client receives AgentResponse with response_data containing structured output
         """
-        user_id, session_id = pubsub_test_app.setup_user()
+        agent_id, session_id = pubsub_test_app.setup_agent()
 
         # Configure LLM responses for two-phase flow
         pubsub_test_app.stub_llm_responses(
@@ -98,14 +97,14 @@ class TestE2EAgentPubSub:
         }
 
         response = pubsub_test_app.send_pubsub_request(
-            user_id,
+            agent_id,
             session_id,
             "Extract person info: Jane is 30 years old",
             output_format=output_format,
         )
 
         assert response is not None, "Timed out waiting for response"
-        assert response.user_id == user_id
+        assert response.agent_id == agent_id
         assert response.session_id == session_id
         assert response.status == "success"
         # Response always has response_data (structured output)
@@ -123,18 +122,18 @@ class TestE2EAgentPubSub:
 
         This exercises the RabbitMQ subscriber's timeout path (inactivity_timeout).
         """
-        user_id, session_id = pubsub_test_app.setup_user()
+        agent_id, session_id = pubsub_test_app.setup_agent()
 
         # Make LLM mock sleep longer than our timeout
         def slow_generate(*args, **kwargs):
             time.sleep(3.0)  # Sleep 3 seconds
-            return torch.tensor([[1, 2, 3, 4, 5, 6]])
+            return "I'm ready to help you."
 
-        pubsub_test_app._llm_adapter._model.generate.side_effect = slow_generate
+        pubsub_test_app._llm_adapter._generate.side_effect = slow_generate
 
         # Use short timeout (2 seconds) - shorter than the 3 second sleep
         response = pubsub_test_app.send_pubsub_request(
-            user_id, session_id, "Hello", timeout_seconds=2
+            agent_id, session_id, "Hello", timeout_seconds=2
         )
 
         # Should timeout and return None

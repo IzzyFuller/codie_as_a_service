@@ -30,7 +30,6 @@ from codie_as_a_service.main_http import (
     _get_memory_tool_definitions,
     _build_orchestrator_phases,
 )
-from codie_as_a_service.core.phase_models import PhaseDefinition, ProcessResult
 from codie_as_a_service.services.agent.react_agent import ReActAgent
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
 from codie_as_a_service.services.tools.memory_tool_executor import MemoryToolExecutor
@@ -440,20 +439,11 @@ def agent_app(
         tools=tools,
     )
     phases = _build_orchestrator_phases(file_prompt_adapter, tools)
-    format_phase = PhaseDefinition(
-        name="format",
-        system_prompt=(
-            "You are a JSON formatter. Return ONLY valid JSON, no other text. "
-            'Example: {"response": "Hello!"}'
-        ),
-        output_schema=ProcessResult,
-    )
     orchestrator = ReActOrchestrator(
         react_agent=agent,
         llm=pubsub_llm_adapter,
         memory=pubsub_memory_service,
         phases=phases,
-        format_phase=format_phase,
     )
 
     # Adapters implement synapse protocols
@@ -817,17 +807,12 @@ class TestApp:
         """
         Wrap test responses with auto-generated orchestrator phase defaults.
 
-        Maps: all-but-last responses -> PROCESS phase (repeated per iteration)
-              last response -> FORMAT phase
+        Maps: all responses -> PROCESS phase (repeated per iteration)
         Auto-generates: HYDRATE, EXTEND, VALIDATE, SYNTHESIZE per iteration.
+        FORMAT phase is disabled — no LLM call needed.
         """
-        if len(responses) >= 2:
-            process_specs = responses[:-1]
-            format_spec = responses[-1]
-        elif len(responses) == 1:
-            process_specs = []
-            format_spec = responses[0]
-        else:
+        process_specs = responses
+        if not process_specs:
             return []
 
         # Auto-generated phase defaults
@@ -847,25 +832,34 @@ class TestApp:
             stop_reason="end_turn",
             content='{"done": false, "justification": "Needs more work", "feedback": "Incomplete"}',
         )
+
+        # SYNTHESIZE echoes the last PROCESS response content as the response field
+        last_process_content = process_specs[-1].content if process_specs else ""
         synthesize = LLMResponseSpec(
             stop_reason="end_turn",
-            content='{"writes": [], "summary": "Persisted state"}',
+            content=json.dumps(
+                {
+                    "response": last_process_content,
+                    "writes": [],
+                    "summary": "Persisted state",
+                }
+            ),
         )
 
+        # Phase order: HYDRATE -> EXTEND -> PROCESS -> SYNTHESIZE -> VALIDATE
         full_sequence = []
         for i in range(iterations):
             is_last = i == iterations - 1
             full_sequence.append(hydrate)
             full_sequence.append(extend)
             full_sequence.extend(process_specs)
+            full_sequence.append(synthesize)
             if is_last:
                 full_sequence.append(validate_pass)
-                # SYNTHESIZE skipped when done=True (loop breaks)
             else:
                 full_sequence.append(validate_fail)
-                full_sequence.append(synthesize)
 
-        full_sequence.append(format_spec)
+        # FORMAT phase disabled — no LLM call, so no response needed
         return [self._to_adapter_response(r) for r in full_sequence]
 
     def reset_llm(self) -> None:

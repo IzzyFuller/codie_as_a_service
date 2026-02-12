@@ -67,12 +67,17 @@ class AgentMessageHandler:
         # Process request through orchestrator
         try:
             result = self._orchestrator.run(
+                session_id=request.session_id,
                 agent_id=request.agent_id,
                 instruction=request.message,
                 tool_executor=self._tool_executor,
                 output_format=request.output_format,
             )
-            response_data = result
+            response_data = {
+                "output": result.response,
+                "session_id": result.session_id,
+                "done": result.done,
+            }
             status = "success"
 
         except ValueError as e:

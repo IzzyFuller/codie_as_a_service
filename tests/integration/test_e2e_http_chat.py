@@ -27,15 +27,8 @@ class TestE2EHTTPChat:
         """
         agent_id, session_id = test_app.setup_agent()
 
-        # Configure LLM responses for two-phase flow
         test_app.stub_llm_responses(
-            # Phase 1: ReAct loop response
             LLMResponseSpec(stop_reason="end_turn", content="I'm ready to help you."),
-            # Phase 2: Default structured output format {"response": "text"}
-            LLMResponseSpec(
-                stop_reason="end_turn",
-                content='{"response": "I\'m ready to help you."}',
-            ),
         )
 
         events = test_app.chat(agent_id, session_id, "Hello, can you help me?")
@@ -47,12 +40,9 @@ class TestE2EHTTPChat:
         assert len(response_events) == 1, "Expected exactly one response event"
         assert len(done_events) == 1, "Expected exactly one done event"
 
-        # Response event should have default structured format
         response_data = response_events[0]["data"]
         assert isinstance(response_data, dict), "Response should be structured dict"
-        assert "response" in response_data, (
-            "Response should have 'response' field (default format)"
-        )
+        assert response_data["output"] == "I'm ready to help you."
 
         # Done event should have usage stats
         done_data = done_events[0]["data"]
@@ -103,10 +93,7 @@ class TestE2EHTTPChat:
                     )
                 ],
             ),
-            # Phase 1: ReAct loop - final response
             LLMResponseSpec(stop_reason="end_turn", content="Got it!"),
-            # Phase 2: Default structured output format
-            LLMResponseSpec(stop_reason="end_turn", content='{"response": "Got it!"}'),
         )
 
         # Client sends request
@@ -151,13 +138,7 @@ class TestE2EHTTPChat:
                     )
                 ],
             ),
-            # Phase 1: ReAct loop - final response
             LLMResponseSpec(stop_reason="end_turn", content="You're on PROJECT_ALPHA."),
-            # Phase 2: Default structured output format
-            LLMResponseSpec(
-                stop_reason="end_turn",
-                content='{"response": "You\'re on PROJECT_ALPHA."}',
-            ),
         )
 
         # Client sends request
@@ -189,13 +170,8 @@ class TestE2EHTTPChat:
             ],
         )
 
-        # max_iterations defaults to 10, so 10 tool_calls responses + 1 structure output
         test_app.stub_llm_responses(
             *([tool_loop_response] * 10),
-            LLMResponseSpec(
-                stop_reason="end_turn",
-                content='{"response": "I couldn\'t complete the request."}',
-            ),
         )
 
         # Client sends request
@@ -215,51 +191,45 @@ class TestE2EHTTPChat:
         """
         agent_id, session_id = test_app.setup_agent()
 
-        # Configure LLM responses for two-phase flow
         test_app.stub_llm_responses(
-            # Phase 1: ReAct loop response
             LLMResponseSpec(
                 stop_reason="end_turn", content="John's email is [email protected]"
             ),
-            # Phase 2: Structured output response
-            LLMResponseSpec(
-                stop_reason="end_turn",
-                content='{"name": "John", "email": "[email protected]"}',
-            ),
         )
 
-        # Define output schema
-        output_format = {
-            "type": "json_schema",
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "email": {"type": "string"},
-                },
-                "required": ["name", "email"],
-            },
-        }
-
-        # Client sends request with output_format
         events = test_app.chat(
             agent_id,
             session_id,
             "Extract contact: John ([email protected])",
-            output_format,
         )
 
-        # Should receive response event (always)
         response_events = [e for e in events if e["event"] == "response"]
         done_events = [e for e in events if e["event"] == "done"]
 
         assert len(response_events) == 1, "Expected exactly one response event"
         assert len(done_events) == 1, "Expected exactly one done event"
 
-        # Response event should have the parsed JSON data
         response_data = response_events[0]["data"]
-        assert response_data["name"] == "John"
-        assert response_data["email"] == "[email protected]"
+        assert response_data["output"] == "John's email is [email protected]"
+        assert "done" in response_data
+
+        test_app.reset_llm()
+
+    def test_response_contains_session_context_fields(self, test_app):
+        """
+        Given: A user exists with identity in memory
+        When: Client POSTs to /chat with message
+        Then: Response contains session_id and done fields from SessionContext
+        """
+        agent_id, session_id = test_app.setup_agent()
+        test_app.stub_llm_responses(
+            LLMResponseSpec(stop_reason="end_turn", content="Hello!"),
+        )
+        events = test_app.chat(agent_id, session_id, "Hi")
+        response_data = [e for e in events if e["event"] == "response"][0]["data"]
+        assert "session_id" in response_data
+        assert "done" in response_data
+        assert response_data["done"] is True
 
         test_app.reset_llm()
 
@@ -323,14 +293,8 @@ class TestE2EHTTPChat:
                 content="Let me list your memory keys.",
                 tool_calls=[ToolCallSpec(name="list_memory_keys", arguments={})],
             ),
-            # Phase 1: ReAct loop - final response
             LLMResponseSpec(
                 stop_reason="end_turn", content="You have: current_session, notes"
-            ),
-            # Phase 2: Default structured output format
-            LLMResponseSpec(
-                stop_reason="end_turn",
-                content='{"response": "You have: current_session, notes"}',
             ),
         )
 
@@ -355,10 +319,6 @@ class TestE2EHTTPChat:
 
         test_app.stub_llm_responses(
             LLMResponseSpec(stop_reason="end_turn", content="Working on it."),
-            LLMResponseSpec(
-                stop_reason="end_turn",
-                content='{"response": "Done after additional processing"}',
-            ),
             iterations=2,
         )
 
@@ -387,10 +347,6 @@ class TestE2EHTTPChat:
         # never passes within the limit - tests the safety exit
         test_app.stub_llm_responses(
             LLMResponseSpec(stop_reason="end_turn", content="Still trying..."),
-            LLMResponseSpec(
-                stop_reason="end_turn",
-                content='{"response": "Best effort result"}',
-            ),
             iterations=4,
         )
 

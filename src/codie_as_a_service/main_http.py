@@ -93,20 +93,11 @@ def create_app(
 
     # Build orchestrator phases and orchestrator
     phases = _build_orchestrator_phases(prompt_adapter, tools)
-    format_phase = PhaseDefinition(
-        name="format",
-        system_prompt=(
-            "You are a JSON formatter. Return ONLY valid JSON, no other text. "
-            'Example: {"response": "Hello!"}'
-        ),
-        output_schema=ProcessResult,
-    )
     orchestrator = ReActOrchestrator(
         react_agent=agent,
         llm=llm_adapter,
         memory=memory_service,
         phases=phases,
-        format_phase=format_phase,
     )
 
     def verify_api_key(x_api_key: str | None = Header(None)) -> None:
@@ -122,8 +113,9 @@ def create_app(
     ) -> Generator[str, None, None]:
         """Generate SSE events for chat response."""
         try:
-            # Process through orchestrator (always returns dict)
-            response = orchestrator.run(
+            # Process through orchestrator
+            session_context = orchestrator.run(
+                session_id=session_id,
                 agent_id=agent_id,
                 instruction=message,
                 tool_executor=tool_executor,
@@ -131,7 +123,12 @@ def create_app(
             )
 
             # Emit structured response
-            yield f"event: response\ndata: {json.dumps(response)}\n\n"
+            response_payload = {
+                "output": session_context.response,
+                "session_id": session_context.session_id,
+                "done": session_context.done,
+            }
+            yield f"event: response\ndata: {json.dumps(response_payload)}\n\n"
 
             # Emit done event
             yield f"event: done\ndata: {json.dumps({'usage': {'input_tokens': 0, 'output_tokens': 0}})}\n\n"
@@ -225,6 +222,7 @@ def _build_orchestrator_phases(
             tools=[],
             output_schema=HydratedIdentity,
             max_iterations=1,
+            sets_identity_from="summary",
         ),
         PhaseDefinition(
             name="extend",
@@ -239,19 +237,21 @@ def _build_orchestrator_phases(
             max_iterations=10,
         ),
         PhaseDefinition(
+            name="synthesize",
+            system_prompt=prompt_adapter.get_prompt("orchestrator_synthesize"),
+            tools=tools,
+            output_schema=SynthesisResult,
+            max_iterations=5,
+            sets_response_from="response",
+        ),
+        PhaseDefinition(
             name="validate",
             system_prompt=prompt_adapter.get_prompt("orchestrator_validate"),
             tools=[],
             output_schema=ValidationResult,
             max_iterations=1,
             completes_request=True,
-        ),
-        PhaseDefinition(
-            name="synthesize",
-            system_prompt=prompt_adapter.get_prompt("orchestrator_synthesize"),
-            tools=tools,
-            output_schema=SynthesisResult,
-            max_iterations=5,
+            sets_done_from="done",
         ),
     ]
 

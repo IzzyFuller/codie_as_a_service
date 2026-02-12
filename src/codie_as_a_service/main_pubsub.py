@@ -192,7 +192,6 @@ def main() -> None:
         _build_orchestrator_phases,
     )
     from codie_as_a_service.services.agent.react_agent import ReActAgent
-    from codie_as_a_service.core.phase_models import PhaseDefinition, ProcessResult
 
     tool_executor = MemoryToolExecutor(memory=memory_service)
     tools = _get_memory_tool_definitions()
@@ -207,20 +206,11 @@ def main() -> None:
         tools=tools,
     )
     phases = _build_orchestrator_phases(prompt_adapter, tools)
-    format_phase = PhaseDefinition(
-        name="format",
-        system_prompt=(
-            "You are a JSON formatter. Return ONLY valid JSON, no other text. "
-            'Example: {"response": "Hello!"}'
-        ),
-        output_schema=ProcessResult,
-    )
     orchestrator = ReActOrchestrator(
         react_agent=agent,
         llm=llm_adapter,
         memory=memory_service,
         phases=phases,
-        format_phase=format_phase,
     )
 
     # Create app

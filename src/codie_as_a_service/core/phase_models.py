@@ -44,10 +44,30 @@ class ValidationResult(BaseModel):
 
 
 class SynthesisResult(BaseModel):
-    """Output of SYNTHESIZE phase: memory writes."""
+    """Output of SYNTHESIZE phase: memory writes + user-facing response."""
 
+    response: str
     writes: list[str]
     summary: str
+
+
+# =============================================================================
+# Session Context (generic pipeline state)
+# =============================================================================
+
+
+class SessionContext(BaseModel):
+    """Generic state that flows through the orchestration pipeline."""
+
+    session_id: str
+    agent_id: str
+    instruction: str
+    iteration: int = 0
+    identity_summary: str = ""
+    conversation_history: list[dict] = []
+    response: str = ""
+    done: bool = False
+    phase_outputs: dict[str, dict] = {}
 
 
 # =============================================================================
@@ -65,21 +85,6 @@ class PhaseDefinition(BaseModel):
     max_iterations: int = 1
     completes_request: bool = False
     max_new_tokens: int | None = None
-
-
-# =============================================================================
-# Orchestration State
-# =============================================================================
-
-
-class OrchestrationContext(BaseModel):
-    """Mutable state passed between phases within an iteration."""
-
-    agent_id: str
-    instruction: str
-    iteration: int = 0
-    hydrate: HydratedIdentity | None = None
-    extend: ExtendedInstruction | None = None
-    process: ProcessResult | None = None
-    validate: ValidationResult | None = None
-    synthesize: SynthesisResult | None = None
+    sets_response_from: str | None = None
+    sets_done_from: str | None = None
+    sets_identity_from: str | None = None

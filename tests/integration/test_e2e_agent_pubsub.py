@@ -29,15 +29,8 @@ class TestE2EAgentPubSub:
         """
         agent_id, session_id = pubsub_test_app.setup_agent()
 
-        # Configure LLM responses for two-phase flow
         pubsub_test_app.stub_llm_responses(
-            # Phase 1: ReAct loop response
             LLMResponseSpec(stop_reason="end_turn", content="I'm ready to help you."),
-            # Phase 2: Default structured output format
-            LLMResponseSpec(
-                stop_reason="end_turn",
-                content='{"response": "I\'m ready to help you."}',
-            ),
         )
 
         response = pubsub_test_app.send_pubsub_request(
@@ -73,44 +66,23 @@ class TestE2EAgentPubSub:
         """
         agent_id, session_id = pubsub_test_app.setup_agent()
 
-        # Configure LLM responses for two-phase flow
         pubsub_test_app.stub_llm_responses(
-            # Phase 1: ReAct loop response
             LLMResponseSpec(stop_reason="end_turn", content="Jane is 30 years old"),
-            # Phase 2: Structured output response
-            LLMResponseSpec(
-                stop_reason="end_turn", content='{"name": "Jane", "age": 30}'
-            ),
         )
-
-        # Define output schema
-        output_format = {
-            "type": "json_schema",
-            "schema": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string"},
-                    "age": {"type": "integer"},
-                },
-                "required": ["name", "age"],
-            },
-        }
 
         response = pubsub_test_app.send_pubsub_request(
             agent_id,
             session_id,
             "Extract person info: Jane is 30 years old",
-            output_format=output_format,
         )
 
         assert response is not None, "Timed out waiting for response"
         assert response.agent_id == agent_id
         assert response.session_id == session_id
         assert response.status == "success"
-        # Response always has response_data (structured output)
         assert response.response_data is not None
-        assert response.response_data["name"] == "Jane"
-        assert response.response_data["age"] == 30
+        assert response.response_data["output"] == "Jane is 30 years old"
+        assert "done" in response.response_data
 
         pubsub_test_app.reset_llm()
 

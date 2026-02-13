@@ -10,17 +10,26 @@ class GCSMemoryAdapter:
     """
     GCS-based memory storage adapter.
 
-    Stores agent memory files at: agents/{agent_id}/{key}.md
+    Stores agent memory files at: {agent_path_template}/{key}.md
+    Default template is "agents/{agent_id}" for backward compatibility.
     """
 
-    def __init__(self, bucket: storage.Bucket):
+    def __init__(
+        self, bucket: storage.Bucket, agent_path_template: str = "agents/{agent_id}"
+    ):
         """
         Initialize GCS memory adapter.
 
         Args:
             bucket: GCS bucket for memory storage
+            agent_path_template: Template for agent path resolution.
+                Supports {agent_id} placeholder. Examples:
+                - "agents/{agent_id}" (default): agents/{agent_id}/{key}.md
+                - "" (empty): {key}.md (flat, bucket root)
+                - "{agent_id}": {agent_id}/{key}.md (no agents/ prefix)
         """
         self.bucket = bucket
+        self._agent_path_template = agent_path_template
 
     def _get_blob_path(self, agent_id: str, key: str) -> str:
         """
@@ -31,9 +40,10 @@ class GCSMemoryAdapter:
             key: Memory key
 
         Returns:
-            Blob path: agents/{agent_id}/{key}.md
+            Blob path based on agent_path_template
         """
-        return f"agents/{agent_id}/{key}.md"
+        prefix = self._agent_path_template.format(agent_id=agent_id)
+        return f"{prefix}/{key}.md" if prefix else f"{key}.md"
 
     def read_file(self, agent_id: str, key: str) -> Optional[str]:
         """
@@ -78,7 +88,8 @@ class GCSMemoryAdapter:
         Returns:
             List of memory keys (without .md extension)
         """
-        prefix = f"agents/{agent_id}/"
+        agent_prefix = self._agent_path_template.format(agent_id=agent_id)
+        prefix = f"{agent_prefix}/" if agent_prefix else ""
         blobs = self.bucket.list_blobs(prefix=prefix)
 
         return [blob.name.removeprefix(prefix).removesuffix(".md") for blob in blobs]

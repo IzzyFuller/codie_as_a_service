@@ -7,21 +7,31 @@ class LocalMemoryAdapter:
     """
     Local filesystem-based memory storage adapter.
 
-    Stores agent memory files at: {base_dir}/agents/{agent_id}/{key}.md
+    Stores agent memory files at: {base_dir}/{agent_path_template}/{key}.md
+    Default template is "agents/{agent_id}" for backward compatibility.
     """
 
-    def __init__(self, base_dir: str | Path):
+    def __init__(
+        self, base_dir: str | Path, agent_path_template: str = "agents/{agent_id}"
+    ):
         """
         Initialize local memory adapter.
 
         Args:
             base_dir: Base directory for memory storage
+            agent_path_template: Template for agent directory resolution.
+                Supports {agent_id} placeholder. Examples:
+                - "agents/{agent_id}" (default): {base_dir}/agents/{agent_id}/{key}.md
+                - "" (empty): {base_dir}/{key}.md (flat, base_dir IS the agent dir)
+                - "{agent_id}": {base_dir}/{agent_id}/{key}.md (no agents/ prefix)
         """
         self.base_dir = Path(base_dir)
+        self._agent_path_template = agent_path_template
 
     def _get_agent_dir(self, agent_id: str) -> Path:
         """Get directory path for agent memory files."""
-        return self.base_dir / "agents" / agent_id
+        relative = self._agent_path_template.format(agent_id=agent_id)
+        return self.base_dir / relative if relative else self.base_dir
 
     def _get_file_path(self, agent_id: str, key: str) -> Path:
         """Get file path for user memory file."""

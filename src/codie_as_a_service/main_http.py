@@ -33,9 +33,15 @@ from codie_as_a_service.core.phase_models import (
     SynthesisResult,
     ValidationResult,
 )
+from codie_as_a_service.adapters.mcp.mcp_client import MCPStdioClient
+from codie_as_a_service.core.protocols import ToolExecutor
 from codie_as_a_service.services.agent.react_agent import ReActAgent
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
 from codie_as_a_service.services.memory.memory_service import MemoryService
+from codie_as_a_service.services.tools.composite_tool_executor import (
+    CompositeToolExecutor,
+)
+from codie_as_a_service.services.tools.mcp_tool_executor import MCPToolExecutor
 from codie_as_a_service.services.tools.memory_tool_executor import MemoryToolExecutor
 
 load_dotenv()
@@ -61,6 +67,8 @@ def create_app(
     prompt_adapter: PromptProtocol,
     prompt_names: list[str],
     auth: AuthProtocol,
+    tool_executor: ToolExecutor | None = None,
+    tools: list[ToolDefinition] | None = None,
 ) -> FastAPI:
     """
     Create FastAPI app with chat endpoint.
@@ -71,15 +79,19 @@ def create_app(
         prompt_adapter: File-based prompt adapter
         prompt_names: List of prompt names to fetch and combine for system prompt
         auth: Authentication adapter for verifying requests
+        tool_executor: Optional custom tool executor (default: MemoryToolExecutor)
+        tools: Optional custom tool definitions (default: memory tools only)
 
     Returns:
         Configured FastAPI application
     """
     app = FastAPI(title="Deep Agent Service")
 
-    # Build tool executor and tool definitions
-    tool_executor = MemoryToolExecutor(memory=memory_service)
-    tools = _get_memory_tool_definitions()
+    # Build tool executor and tool definitions (defaults if not provided)
+    if tool_executor is None:
+        tool_executor = MemoryToolExecutor(memory=memory_service)
+    if tools is None:
+        tools = _get_memory_tool_definitions()
 
     # Initialize agent with adapters
     agent = ReActAgent(
@@ -211,6 +223,77 @@ def _get_memory_tool_definitions() -> list[ToolDefinition]:
     ]
 
 
+def _get_mcp_tool_definitions() -> list[ToolDefinition]:
+    """Get tool definitions for cognitive-memory MCP tools."""
+    return [
+        ToolDefinition(
+            name="list_entities",
+            description="List entities in long-term memory, optionally filtered by prefix",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "filter_prefix": {
+                        "type": "string",
+                        "description": "Optional prefix filter (e.g., 'people/', 'projects/')",
+                        "default": "",
+                    }
+                },
+            },
+        ),
+        ToolDefinition(
+            name="read_entity",
+            description="Read entity from long-term memory by path",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "entity_path": {
+                        "type": "string",
+                        "description": "Full path to entity (e.g., 'people/john-doe', 'projects/mcp-servers')",
+                    }
+                },
+                "required": ["entity_path"],
+            },
+        ),
+        ToolDefinition(
+            name="write_entity",
+            description="Write entity to long-term memory",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "entity_path": {
+                        "type": "string",
+                        "description": "Full path to entity (e.g., 'people/john-doe', 'concepts/learning')",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Content to write to entity",
+                    },
+                },
+                "required": ["entity_path", "content"],
+            },
+        ),
+        ToolDefinition(
+            name="add_session_note",
+            description="Add contextual note to current session",
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "note_type": {
+                        "type": "string",
+                        "enum": ["context", "insight", "decision"],
+                        "description": "Type of session note to add",
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Note content to append to current session",
+                    },
+                },
+                "required": ["note_type", "content"],
+            },
+        ),
+    ]
+
+
 def _build_orchestrator_phases(
     prompt_adapter: PromptProtocol, tools: list[ToolDefinition]
 ) -> list[PhaseDefinition]:
@@ -280,6 +363,10 @@ def main() -> None:
     if not api_key:
         raise ValueError("API_KEY environment variable is required")
 
+    # Path template for agent directory resolution (default: "agents/{agent_id}")
+    # Set to empty string for flat directory (base_dir IS agent dir)
+    storage_path_template = os.environ.get("STORAGE_PATH_TEMPLATE", "agents/{agent_id}")
+
     # Initialize storage adapter based on type
     if storage_adapter_type == "gcs":
         gcs_bucket_name = os.environ.get("GCS_BUCKET_NAME")
@@ -287,12 +374,16 @@ def main() -> None:
             raise ValueError("GCS_BUCKET_NAME required when STORAGE_ADAPTER=gcs")
         gcs_client = storage.Client()
         bucket = gcs_client.bucket(gcs_bucket_name)
-        storage_adapter: MemoryProtocol = GCSMemoryAdapter(bucket=bucket)
+        storage_adapter: MemoryProtocol = GCSMemoryAdapter(
+            bucket=bucket, agent_path_template=storage_path_template
+        )
     elif storage_adapter_type == "local":
         storage_dir = os.environ.get("STORAGE_DIR")
         if not storage_dir:
             raise ValueError("STORAGE_DIR required when STORAGE_ADAPTER=local")
-        storage_adapter = LocalMemoryAdapter(base_dir=storage_dir)
+        storage_adapter = LocalMemoryAdapter(
+            base_dir=storage_dir, agent_path_template=storage_path_template
+        )
     else:
         raise ValueError(f"Unknown STORAGE_ADAPTER: {storage_adapter_type}")
 
@@ -316,6 +407,36 @@ def main() -> None:
     # Initialize auth adapter
     auth_adapter = APIKeyAuthAdapter(valid_key=api_key)
 
+    # Build tool executor and definitions
+    # When MCP is configured, cognitive-memory replaces memory tools entirely
+    # When MCP is not configured, fall back to basic memory tools
+    mcp_server_path = os.environ.get("MCP_SERVER_PATH")
+    mcp_memory_path = os.environ.get("MCP_MEMORY_PATH")
+
+    if mcp_server_path and mcp_memory_path:
+        logger.info(
+            "MCP tools enabled: %s (memory: %s)", mcp_server_path, mcp_memory_path
+        )
+        mcp_client = MCPStdioClient(
+            command="node",
+            args=[mcp_server_path],
+            env={"COGNITIVE_MEMORY_PATH": mcp_memory_path},
+        )
+        mcp_executor = MCPToolExecutor(mcp_client=mcp_client)
+
+        # MCP is the sole memory tool provider
+        all_executors = {
+            "read_entity": mcp_executor,
+            "write_entity": mcp_executor,
+            "list_entities": mcp_executor,
+            "add_session_note": mcp_executor,
+        }
+        tool_executor: ToolExecutor = CompositeToolExecutor(executors=all_executors)
+        tools = _get_mcp_tool_definitions()
+    else:
+        tool_executor = MemoryToolExecutor(memory=memory_service)
+        tools = _get_memory_tool_definitions()
+
     # Create and run app
     app = create_app(
         memory_service=memory_service,
@@ -323,6 +444,8 @@ def main() -> None:
         prompt_adapter=prompt_adapter,
         prompt_names=prompt_names,
         auth=auth_adapter,
+        tool_executor=tool_executor,
+        tools=tools,
     )
 
     uvicorn.run(app, host=host, port=port)

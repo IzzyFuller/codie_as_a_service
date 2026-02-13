@@ -46,7 +46,7 @@ class ValidationResult(BaseModel):
 class SynthesisResult(BaseModel):
     """Output of SYNTHESIZE phase: memory writes + user-facing response."""
 
-    response: str = ""
+    response: str
     writes: list[str]
     summary: str
 

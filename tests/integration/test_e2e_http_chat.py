@@ -27,8 +27,12 @@ class TestE2EHTTPChat:
         """
         agent_id, session_id = test_app.setup_agent()
 
-        test_app.stub_llm_responses(
-            LLMResponseSpec(stop_reason="end_turn", content="I'm ready to help you."),
+        test_app.stub_phases(
+            process=[
+                LLMResponseSpec(
+                    stop_reason="end_turn", content="I'm ready to help you."
+                ),
+            ],
         )
 
         events = test_app.chat(agent_id, session_id, "Hello, can you help me?")
@@ -77,23 +81,24 @@ class TestE2EHTTPChat:
         """
         agent_id, session_id = test_app.setup_agent()
 
-        # Configure LLM to use write_memory tool
-        test_app.stub_llm_responses(
-            # Phase 1: ReAct loop - tool use
-            LLMResponseSpec(
-                stop_reason="tool_use",
-                content="I'll save that preference.",
-                tool_calls=[
-                    ToolCallSpec(
-                        name="write_memory",
-                        arguments={
-                            "key": "current_session",
-                            "content": "# Session\n\nUser prefers dark mode.",
-                        },
-                    )
-                ],
-            ),
-            LLMResponseSpec(stop_reason="end_turn", content="Got it!"),
+        # Configure PROCESS phase to use write_memory tool
+        test_app.stub_phases(
+            process=[
+                LLMResponseSpec(
+                    stop_reason="tool_use",
+                    content="I'll save that preference.",
+                    tool_calls=[
+                        ToolCallSpec(
+                            name="write_memory",
+                            arguments={
+                                "key": "current_session",
+                                "content": "# Session\n\nUser prefers dark mode.",
+                            },
+                        )
+                    ],
+                ),
+                LLMResponseSpec(stop_reason="end_turn", content="Got it!"),
+            ],
         )
 
         # Client sends request
@@ -126,19 +131,22 @@ class TestE2EHTTPChat:
             agent_id, "current_session", "# Session\n\nWorking on PROJECT_ALPHA."
         )
 
-        # Configure LLM to use read_memory tool
-        test_app.stub_llm_responses(
-            # Phase 1: ReAct loop - tool use
-            LLMResponseSpec(
-                stop_reason="tool_use",
-                content="Let me check.",
-                tool_calls=[
-                    ToolCallSpec(
-                        name="read_memory", arguments={"key": "current_session"}
-                    )
-                ],
-            ),
-            LLMResponseSpec(stop_reason="end_turn", content="You're on PROJECT_ALPHA."),
+        # Configure PROCESS phase to use read_memory tool
+        test_app.stub_phases(
+            process=[
+                LLMResponseSpec(
+                    stop_reason="tool_use",
+                    content="Let me check.",
+                    tool_calls=[
+                        ToolCallSpec(
+                            name="read_memory", arguments={"key": "current_session"}
+                        )
+                    ],
+                ),
+                LLMResponseSpec(
+                    stop_reason="end_turn", content="You're on PROJECT_ALPHA."
+                ),
+            ],
         )
 
         # Client sends request
@@ -161,7 +169,7 @@ class TestE2EHTTPChat:
         """
         agent_id, session_id = test_app.setup_agent()
 
-        # Configure LLM to always request tool use (infinite loop scenario)
+        # Configure PROCESS phase to always request tool use (infinite loop scenario)
         tool_loop_response = LLMResponseSpec(
             stop_reason="tool_use",
             content="Let me check more...",
@@ -170,8 +178,8 @@ class TestE2EHTTPChat:
             ],
         )
 
-        test_app.stub_llm_responses(
-            *([tool_loop_response] * 10),
+        test_app.stub_phases(
+            process=[tool_loop_response] * 10,
         )
 
         # Client sends request
@@ -191,10 +199,12 @@ class TestE2EHTTPChat:
         """
         agent_id, session_id = test_app.setup_agent()
 
-        test_app.stub_llm_responses(
-            LLMResponseSpec(
-                stop_reason="end_turn", content="John's email is [email protected]"
-            ),
+        test_app.stub_phases(
+            process=[
+                LLMResponseSpec(
+                    stop_reason="end_turn", content="John's email is [email protected]"
+                ),
+            ],
         )
 
         events = test_app.chat(
@@ -222,8 +232,10 @@ class TestE2EHTTPChat:
         Then: Response contains session_id and done fields from SessionContext
         """
         agent_id, session_id = test_app.setup_agent()
-        test_app.stub_llm_responses(
-            LLMResponseSpec(stop_reason="end_turn", content="Hello!"),
+        test_app.stub_phases(
+            process=[
+                LLMResponseSpec(stop_reason="end_turn", content="Hello!"),
+            ],
         )
         events = test_app.chat(agent_id, session_id, "Hi")
         response_data = [e for e in events if e["event"] == "response"][0]["data"]
@@ -285,17 +297,18 @@ class TestE2EHTTPChat:
         test_app.write_memory(agent_id, "current_session", "# Session")
         test_app.write_memory(agent_id, "notes", "# Notes")
 
-        # Configure LLM to use list_memory_keys tool
-        test_app.stub_llm_responses(
-            # Phase 1: ReAct loop - tool use
-            LLMResponseSpec(
-                stop_reason="tool_use",
-                content="Let me list your memory keys.",
-                tool_calls=[ToolCallSpec(name="list_memory_keys", arguments={})],
-            ),
-            LLMResponseSpec(
-                stop_reason="end_turn", content="You have: current_session, notes"
-            ),
+        # Configure PROCESS phase to use list_memory_keys tool
+        test_app.stub_phases(
+            process=[
+                LLMResponseSpec(
+                    stop_reason="tool_use",
+                    content="Let me list your memory keys.",
+                    tool_calls=[ToolCallSpec(name="list_memory_keys", arguments={})],
+                ),
+                LLMResponseSpec(
+                    stop_reason="end_turn", content="You have: current_session, notes"
+                ),
+            ],
         )
 
         # Client sends request
@@ -317,8 +330,10 @@ class TestE2EHTTPChat:
         """
         agent_id, session_id = test_app.setup_agent()
 
-        test_app.stub_llm_responses(
-            LLMResponseSpec(stop_reason="end_turn", content="Working on it."),
+        test_app.stub_phases(
+            process=[
+                LLMResponseSpec(stop_reason="end_turn", content="Working on it."),
+            ],
             iterations=2,
         )
 
@@ -329,6 +344,35 @@ class TestE2EHTTPChat:
 
         assert len(response_events) == 1
         assert len(done_events) == 1
+
+        test_app.reset_llm()
+
+    def test_stub_phases_simple_end_turn(self, test_app):
+        """
+        Given: stub_phases configures per-phase responses directly
+        When: Client POSTs to /chat with message
+        Then: Client receives correct response through the factory path
+
+        Validates the stub_phases factory produces correct side_effect
+        ordering for the full 5-phase pipeline.
+        """
+        agent_id, session_id = test_app.setup_agent()
+
+        test_app.stub_phases(
+            process=[
+                LLMResponseSpec(stop_reason="end_turn", content="Factory works!"),
+            ],
+        )
+
+        events = test_app.chat(agent_id, session_id, "Test the factory")
+
+        response_events = [e for e in events if e["event"] == "response"]
+        done_events = [e for e in events if e["event"] == "done"]
+
+        assert len(response_events) == 1
+        assert len(done_events) == 1
+        assert response_events[0]["data"]["output"] == "Factory works!"
+        assert response_events[0]["data"]["done"] is True
 
         test_app.reset_llm()
 
@@ -345,8 +389,10 @@ class TestE2EHTTPChat:
 
         # iterations=4 exceeds max_outer_iterations (3), so validation
         # never passes within the limit - tests the safety exit
-        test_app.stub_llm_responses(
-            LLMResponseSpec(stop_reason="end_turn", content="Still trying..."),
+        test_app.stub_phases(
+            process=[
+                LLMResponseSpec(stop_reason="end_turn", content="Still trying..."),
+            ],
             iterations=4,
         )
 

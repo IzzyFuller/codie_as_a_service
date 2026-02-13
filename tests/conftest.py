@@ -731,6 +731,28 @@ class TestApp:
 
     _response_counter = 0
 
+    # Phase default responses (schema-constrained JSON for each phase)
+    _TOOL_LOOP_EXIT = LLMResponseSpec(stop_reason="end_turn", content="done")
+
+    _PHASE_DEFAULTS = {
+        "hydrate": LLMResponseSpec(
+            stop_reason="end_turn",
+            content='{"summary": "Test identity", "key_patterns": [], "session_state": "Testing"}',
+        ),
+        "extend": LLMResponseSpec(
+            stop_reason="end_turn",
+            content='{"instruction": "Process request", "tool_manifest": [], "rationale": "Direct", "memory_references": []}',
+        ),
+        "validate_pass": LLMResponseSpec(
+            stop_reason="end_turn",
+            content='{"done": true, "justification": "Request completed", "feedback": ""}',
+        ),
+        "validate_fail": LLMResponseSpec(
+            stop_reason="end_turn",
+            content='{"done": false, "justification": "Needs more work", "feedback": "Incomplete"}',
+        ),
+    }
+
     def __init__(
         self,
         memory_service,
@@ -785,93 +807,142 @@ class TestApp:
         """
         Configure LLM to return these responses in sequence.
 
+        Thin delegate to stub_phases() for backward compatibility.
+        All responses are mapped to the PROCESS phase tool loop.
+
         Args:
-            responses: Domain-level response specs. Converted internally
-                      to text that the adapter will parse.
-            iterations: Number of orchestrator iterations. Default 1 means
-                       validation passes immediately. Higher values simulate
-                       validation requiring more work before completing.
+            responses: Domain-level response specs mapped to PROCESS phase.
+            iterations: Number of orchestrator iterations.
         """
-        adapter_responses = self._wrap_with_phase_defaults(list(responses), iterations)
+        self.stub_phases(process=list(responses), iterations=iterations)
 
-        if self._is_claude_cli:
-            # ClaudeCliAdapter: mock _run_claude method
-            self._llm_adapter._run_claude.side_effect = adapter_responses
-        else:
-            # LocalLLMAdapter: mock _generate method
-            self._llm_adapter._generate.side_effect = adapter_responses
+    def _build_non_tool_phase(
+        self, schema_response: LLMResponseSpec
+    ) -> list[LLMResponseSpec]:
+        """Build responses for a non-tool phase (HYDRATE, EXTEND, VALIDATE).
 
-    def _wrap_with_phase_defaults(
-        self, responses: list[LLMResponseSpec], iterations: int = 1
-    ) -> list[str]:
+        Non-tool phases consume exactly 1 schema-constrained LLM call.
         """
-        Wrap test responses with auto-generated orchestrator phase defaults.
+        return [schema_response]
 
-        Maps: all responses -> PROCESS phase (repeated per iteration)
-        Auto-generates: HYDRATE, EXTEND, VALIDATE, SYNTHESIZE per iteration.
-        FORMAT phase is disabled — no LLM call needed.
+    def _build_tool_phase(
+        self,
+        tool_loop_responses: list[LLMResponseSpec],
+        schema_response: LLMResponseSpec,
+    ) -> list[LLMResponseSpec]:
+        """Build responses for a tool-using phase (PROCESS, SYNTHESIZE).
+
+        Tool-using phases consume:
+        1. Tool loop calls (at least 1 end_turn to exit, plus any tool_use before it)
+        2. Schema-constrained call (structured JSON output)
+
+        The tool loop ALWAYS makes at least 1 LLM call, so empty responses
+        get a tool_loop_exit. Auto-appends tool_loop_exit if last response
+        is tool_use (loop needs end_turn to terminate).
         """
-        process_specs = responses
-        if not process_specs:
-            return []
+        segment = list(tool_loop_responses)
+        if not segment or segment[-1].stop_reason != "end_turn":
+            segment.append(self._TOOL_LOOP_EXIT)
+        segment.append(schema_response)
+        return segment
 
-        # Auto-generated phase defaults
-        hydrate = LLMResponseSpec(
-            stop_reason="end_turn",
-            content='{"summary": "Test identity", "key_patterns": [], "session_state": "Testing"}',
-        )
-        extend = LLMResponseSpec(
-            stop_reason="end_turn",
-            content='{"instruction": "Process request", "tool_manifest": [], "rationale": "Direct", "memory_references": []}',
-        )
-        validate_pass = LLMResponseSpec(
-            stop_reason="end_turn",
-            content='{"done": true, "justification": "Request completed", "feedback": ""}',
-        )
-        validate_fail = LLMResponseSpec(
-            stop_reason="end_turn",
-            content='{"done": false, "justification": "Needs more work", "feedback": "Incomplete"}',
-        )
+    def stub_phases(
+        self,
+        *,
+        hydrate: list[LLMResponseSpec] | None = None,
+        extend: list[LLMResponseSpec] | None = None,
+        process: list[LLMResponseSpec] | None = None,
+        synthesize: list[LLMResponseSpec] | None = None,
+        validate: list[LLMResponseSpec] | None = None,
+        iterations: int = 1,
+    ) -> None:
+        """
+        Configure LLM mock with per-phase response sequences.
 
-        # SYNTHESIZE echoes the last PROCESS response content as the response field
-        last_process_content = process_specs[-1].content if process_specs else ""
-        synthesize = LLMResponseSpec(
+        Each phase accepts a list of LLMResponseSpec. Unspecified phases
+        get auto-generated defaults. Assembles a flat side_effect list
+        matching the orchestrator's call order.
+
+        Args:
+            hydrate: Custom HYDRATE phase responses (non-tool, 1 schema call)
+            extend: Custom EXTEND phase responses (non-tool, 1 schema call)
+            process: Custom PROCESS phase responses (tool loop + schema call)
+            synthesize: Custom SYNTHESIZE phase responses (tool loop + schema call)
+            validate: Custom VALIDATE phase responses (non-tool, 1 schema call)
+            iterations: Number of orchestrator iterations (last validates pass)
+        """
+        # Derive content-dependent defaults from process responses
+        last_content = ""
+        if process:
+            last_content = process[-1].content or ""
+
+        process_schema = LLMResponseSpec(
+            stop_reason="end_turn",
+            content=json.dumps({"output": last_content, "tools_used": [], "trace": ""}),
+        )
+        synthesize_schema = LLMResponseSpec(
             stop_reason="end_turn",
             content=json.dumps(
-                {
-                    "response": last_process_content,
-                    "writes": [],
-                    "summary": "Persisted state",
-                }
+                {"response": last_content, "writes": [], "summary": "Persisted state"}
             ),
         )
 
-        # Phase order: HYDRATE -> EXTEND -> PROCESS -> SYNTHESIZE -> VALIDATE
-        full_sequence = []
+        full_sequence: list[LLMResponseSpec] = []
         for i in range(iterations):
             is_last = i == iterations - 1
-            full_sequence.append(hydrate)
-            full_sequence.append(extend)
-            full_sequence.extend(process_specs)
-            full_sequence.append(synthesize)
-            if is_last:
-                full_sequence.append(validate_pass)
-            else:
-                full_sequence.append(validate_fail)
 
-        # FORMAT phase disabled — no LLM call, so no response needed
-        return [self._to_adapter_response(r) for r in full_sequence]
+            # HYDRATE (non-tool)
+            full_sequence.extend(
+                self._build_non_tool_phase(
+                    hydrate[0] if hydrate else self._PHASE_DEFAULTS["hydrate"]
+                )
+            )
+
+            # EXTEND (non-tool)
+            full_sequence.extend(
+                self._build_non_tool_phase(
+                    extend[0] if extend else self._PHASE_DEFAULTS["extend"]
+                )
+            )
+
+            # PROCESS (tool-using)
+            process_loop = process if process else [self._TOOL_LOOP_EXIT]
+            full_sequence.extend(self._build_tool_phase(process_loop, process_schema))
+
+            # SYNTHESIZE (tool-using)
+            synth_loop = synthesize if synthesize else []
+            full_sequence.extend(self._build_tool_phase(synth_loop, synthesize_schema))
+
+            # VALIDATE (non-tool)
+            if validate:
+                full_sequence.extend(self._build_non_tool_phase(validate[0]))
+            elif is_last:
+                full_sequence.extend(
+                    self._build_non_tool_phase(self._PHASE_DEFAULTS["validate_pass"])
+                )
+            else:
+                full_sequence.extend(
+                    self._build_non_tool_phase(self._PHASE_DEFAULTS["validate_fail"])
+                )
+
+        adapter_responses = [self._to_adapter_response(r) for r in full_sequence]
+        self._set_mock_side_effect(adapter_responses)
+
+    def _get_llm_mock(self) -> MagicMock:
+        """Return the adapter-specific mock (ClaudeCliAdapter or LocalLLMAdapter)."""
+        if self._is_claude_cli:
+            return self._llm_adapter._run_claude
+        return self._llm_adapter._generate
+
+    def _set_mock_side_effect(self, responses: list[str]) -> None:
+        """Set side_effect on the adapter-specific LLM mock."""
+        self._get_llm_mock().side_effect = responses
 
     def reset_llm(self) -> None:
         """Reset LLM mock to default state."""
-        if self._is_claude_cli:
-            # ClaudeCliAdapter: reset _run_claude mock
-            self._llm_adapter._run_claude.side_effect = None
-            self._llm_adapter._run_claude.return_value = self._default_response
-        else:
-            # LocalLLMAdapter: reset _generate mock
-            self._llm_adapter._generate.side_effect = None
-            self._llm_adapter._generate.return_value = self._default_response
+        mock = self._get_llm_mock()
+        mock.side_effect = None
+        mock.return_value = self._default_response
 
     def chat(
         self,

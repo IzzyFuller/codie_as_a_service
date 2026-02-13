@@ -2,8 +2,6 @@
 
 import json
 import logging
-from typing import Any
-
 from pydantic import BaseModel
 
 from codie_as_a_service.core.models import (
@@ -12,7 +10,6 @@ from codie_as_a_service.core.models import (
 )
 from codie_as_a_service.core.phase_models import (
     PhaseDefinition,
-    ProcessResult,
     SessionContext,
 )
 from codie_as_a_service.core.protocols import LLMProtocol, ToolExecutor
@@ -52,13 +49,17 @@ class ReActOrchestrator:
         agent_id: str,
         instruction: str,
         tool_executor: ToolExecutor,
-        output_format: dict[str, Any] | None = None,
-    ) -> SessionContext:
+        output_format: type[BaseModel] | None = None,
+    ) -> BaseModel:
         """
         Run the full orchestration loop.
 
-        Returns SessionContext with response, done flag, and all phase outputs.
+        Returns output_format model (defaults to SessionContext) populated
+        from the final context state.
         """
+        if output_format is None:
+            output_format = SessionContext
+
         # Load identity context for this agent
         identity = self._memory.get_identity_context(
             agent_id=agent_id, session_lines=self._session_lines
@@ -67,116 +68,84 @@ class ReActOrchestrator:
             raise ValueError(f"No assistant identity configured for agent '{agent_id}'")
 
         context = SessionContext(
-            session_id=session_id, agent_id=agent_id, instruction=instruction
+            session_id=session_id,
+            agent_id=agent_id,
+            instruction=instruction,
+            identity_summary=(
+                f"Identity: {identity.me}\n"
+                f"Context Anchors: {identity.context_anchors}\n"
+                f"Current Session: {identity.current_session}"
+            ),
         )
 
         for iteration in range(self._max_outer_iterations):
             context.iteration = iteration
 
             for phase in self._phases:
-                result = self._execute_phase(phase, context, tool_executor, identity)
-                context.phase_outputs[phase.name] = result.model_dump()
+                self._execute_phase(phase, context, tool_executor)
 
-                # Declarative merge from PhaseDefinition fields
-                # hasattr guards handle fallback to ProcessResult when
-                # a phase's tool loop output can't be parsed as its schema
-                if phase.sets_identity_from and hasattr(result, phase.sets_identity_from):
-                    context.identity_summary = getattr(result, phase.sets_identity_from)
-                if phase.sets_response_from and hasattr(result, phase.sets_response_from):
-                    context.response = getattr(result, phase.sets_response_from)
-                if phase.sets_done_from and hasattr(result, phase.sets_done_from):
-                    context.done = getattr(result, phase.sets_done_from)
+                if context.done:
+                    return output_format.model_validate(context.model_dump())
 
-                if phase.completes_request and context.done:
-                    return context
-
-            # Reset for next iteration
+            # Archive response and reset for next iteration
             if iteration < self._max_outer_iterations - 1:
-                context.phase_outputs = {}
+                context.conversation_history.append(context.response)
                 context.done = False
                 context.response = ""
 
-        return context
+        return output_format.model_validate(context.model_dump())
 
     def _execute_phase(
         self,
         phase: PhaseDefinition,
         context: SessionContext,
         tool_executor: ToolExecutor,
-        identity: Any = None,
-    ) -> BaseModel:
-        """Execute a single phase and return its typed output."""
+    ) -> None:
+        """Execute a single phase, updating context with results."""
         logger.info("Phase %s starting (iteration %d)", phase.name, context.iteration)
-        phase_input = self._build_phase_input(phase, context, identity)
-        logger.debug("Phase %s input: %.200s", phase.name, phase_input)
+        phase_input = context.model_dump_json()
+        messages = [Message(role="user", content=phase_input)]
 
+        # Tool-using phases: run tool loop first to enrich messages
         if phase.tools:
-            # Tool-using phase: delegate to mini-loop engine
-            messages = [Message(role="user", content=phase_input)]
-            text_result = self._react_agent.run_tool_loop(
+            messages = self._react_agent.run_tool_loop(
                 system_prompt=phase.system_prompt,
                 messages=messages,
                 tools=phase.tools,
                 tool_executor=tool_executor,
                 agent_id=context.agent_id,
-                max_iterations=phase.max_iterations,
-                max_new_tokens=phase.max_new_tokens,
-            )
-            try:
-                return self._parse_phase_output(text_result, phase.output_schema)
-            except (json.JSONDecodeError, ValueError):
-                return self._wrap_tool_loop_output(text_result)
-        else:
-            # Single LLM call phase - use JSON schema to force structured output
-            output_format = {
-                "type": "json_schema",
-                "schema": phase.output_schema.model_json_schema(),
-            }
-            messages = [Message(role="user", content=phase_input)]
-            response = self._llm.call(
-                messages=messages,
-                system_prompt=phase.system_prompt,
-                tools=None,
-                output_format=output_format,
                 max_new_tokens=phase.max_new_tokens,
             )
 
-            text_parts = []
-            for block in response.content:
-                if isinstance(block, ContentBlock):
-                    text_parts.append(block.text)
+        # Schema-constrained call — always
+        output_format = {
+            "type": "json_schema",
+            "schema": phase.output_schema.model_json_schema(),
+        }
+        response = self._llm.call(
+            messages=messages,
+            system_prompt=phase.system_prompt,
+            tools=None,
+            output_format=output_format,
+            max_new_tokens=phase.max_new_tokens,
+        )
 
-            text_result = " ".join(text_parts)
-            logger.info("Phase %s got LLM response: %.200s", phase.name, text_result)
-            return self._parse_phase_output(text_result, phase.output_schema)
+        text_parts = []
+        for block in response.content:
+            if isinstance(block, ContentBlock):
+                text_parts.append(block.text)
 
-    def _build_phase_input(
-        self,
-        phase: PhaseDefinition,
-        context: SessionContext,
-        identity: Any = None,
-    ) -> str:
-        """Build the user message input for a phase from context."""
-        parts = [f"Instruction: {context.instruction}"]
-        parts.append(f"Iteration: {context.iteration}")
+        text_result = " ".join(text_parts)
+        logger.info("Phase %s got LLM response: %.200s", phase.name, text_result)
+        result = self._parse_phase_output(text_result, phase.output_schema)
 
-        # Include identity context for HYDRATE phase
-        if phase.name == "hydrate" and identity is not None:
-            parts.append(f"Identity: {identity.me}")
-            parts.append(f"Context Anchors: {identity.context_anchors}")
-            parts.append(f"Current Session: {identity.current_session}")
-
-        # All prior phase outputs (generic)
-        for phase_name, output in context.phase_outputs.items():
-            for key, value in output.items():
-                if isinstance(value, list):
-                    parts.append(
-                        f"{phase_name}.{key}: {', '.join(str(v) for v in value)}"
-                    )
-                else:
-                    parts.append(f"{phase_name}.{key}: {value}")
-
-        return "\n\n".join(parts)
+        # Phase updates context
+        if phase.sets_identity_from:
+            context.identity_summary = getattr(result, phase.sets_identity_from)
+        if phase.sets_response_from:
+            context.response = getattr(result, phase.sets_response_from)
+        if phase.sets_done_from:
+            context.done = getattr(result, phase.sets_done_from)
 
     def _parse_phase_output(
         self, text: str, output_schema: type[BaseModel]
@@ -186,7 +155,3 @@ class ReActOrchestrator:
         logger.debug("Parsing %s output: %.500s", output_schema.__name__, text)
         data = json.loads(text)
         return output_schema(**data)
-
-    def _wrap_tool_loop_output(self, text: str) -> ProcessResult:
-        """Wrap raw tool loop text into ProcessResult when JSON parsing fails."""
-        return ProcessResult(output=text, tools_used=[], trace="")

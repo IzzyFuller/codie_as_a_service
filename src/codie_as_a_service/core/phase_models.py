@@ -46,7 +46,7 @@ class ValidationResult(BaseModel):
 class SynthesisResult(BaseModel):
     """Output of SYNTHESIZE phase: memory writes + user-facing response."""
 
-    response: str
+    response: str = ""
     writes: list[str]
     summary: str
 
@@ -64,10 +64,9 @@ class SessionContext(BaseModel):
     instruction: str
     iteration: int = 0
     identity_summary: str = ""
-    conversation_history: list[dict] = []
+    conversation_history: list[str] = []
     response: str = ""
     done: bool = False
-    phase_outputs: dict[str, dict] = {}
 
 
 # =============================================================================
@@ -82,8 +81,6 @@ class PhaseDefinition(BaseModel):
     system_prompt: str
     tools: list[ToolDefinition] = []
     output_schema: type[BaseModel]
-    max_iterations: int = 1
-    completes_request: bool = False
     max_new_tokens: int | None = None
     sets_response_from: str | None = None
     sets_done_from: str | None = None

@@ -221,7 +221,6 @@ def _build_orchestrator_phases(
             system_prompt=prompt_adapter.get_prompt("orchestrator_hydrate"),
             tools=[],
             output_schema=HydratedIdentity,
-            max_iterations=1,
             sets_identity_from="summary",
         ),
         PhaseDefinition(
@@ -234,14 +233,12 @@ def _build_orchestrator_phases(
             system_prompt=prompt_adapter.get_prompt("orchestrator_process"),
             tools=tools,
             output_schema=ProcessResult,
-            max_iterations=10,
         ),
         PhaseDefinition(
             name="synthesize",
             system_prompt=prompt_adapter.get_prompt("orchestrator_synthesize"),
             tools=tools,
             output_schema=SynthesisResult,
-            max_iterations=5,
             sets_response_from="response",
         ),
         PhaseDefinition(
@@ -249,8 +246,6 @@ def _build_orchestrator_phases(
             system_prompt=prompt_adapter.get_prompt("orchestrator_validate"),
             tools=[],
             output_schema=ValidationResult,
-            max_iterations=1,
-            completes_request=True,
             sets_done_from="done",
         ),
     ]

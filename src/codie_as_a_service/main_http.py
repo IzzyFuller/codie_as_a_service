@@ -31,16 +31,8 @@ from codie_as_a_service.core.phase_models import (
     SynthesisResult,
     ValidationResult,
 )
-from codie_as_a_service.adapters.mcp.mcp_client import MCPStdioClient
-from codie_as_a_service.core.protocols import ToolExecutor
-from codie_as_a_service.services.agent.react_agent import ReActAgent
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
 from codie_as_a_service.services.memory.memory_service import MemoryService
-from codie_as_a_service.services.tools.composite_tool_executor import (
-    CompositeToolExecutor,
-)
-from codie_as_a_service.services.tools.mcp_tool_executor import MCPToolExecutor
-from codie_as_a_service.services.tools.memory_tool_executor import MemoryToolExecutor
 
 load_dotenv()
 logging.basicConfig(
@@ -65,7 +57,6 @@ def create_app(
     prompt_adapter: PromptProtocol,
     prompt_names: list[str],
     auth: AuthProtocol,
-    tool_executor: ToolExecutor | None = None,
     tools: list[ToolDefinition] | None = None,
 ) -> FastAPI:
     """
@@ -73,11 +64,10 @@ def create_app(
 
     Args:
         memory_service: Service for reading/writing agent memory
-        llm_adapter: OpenAI-compatible LLM adapter
+        llm_adapter: LLM adapter (handles tool execution internally)
         prompt_adapter: File-based prompt adapter
         prompt_names: List of prompt names to fetch and combine for system prompt
         auth: Authentication adapter for verifying requests
-        tool_executor: Optional custom tool executor (default: MemoryToolExecutor)
         tools: Optional custom tool definitions (default: memory tools only)
 
     Returns:
@@ -85,26 +75,12 @@ def create_app(
     """
     app = FastAPI(title="Deep Agent Service")
 
-    # Build tool executor and tool definitions (defaults if not provided)
-    if tool_executor is None:
-        tool_executor = MemoryToolExecutor(memory=memory_service)
     if tools is None:
         tools = _get_memory_tool_definitions()
 
-    # Initialize agent with adapters
-    agent = ReActAgent(
-        llm=llm_adapter,
-        prompts=prompt_adapter,
-        memory=memory_service,
-        prompt_names=prompt_names,
-        tool_executor=tool_executor,
-        tools=tools,
-    )
-
-    # Build orchestrator phases and orchestrator
+    # Build orchestrator — adapter handles tools internally
     phases = _build_orchestrator_phases(prompt_adapter, tools)
     orchestrator = ReActOrchestrator(
-        react_agent=agent,
         llm=llm_adapter,
         memory=memory_service,
         phases=phases,
@@ -128,7 +104,6 @@ def create_app(
                 session_id=session_id,
                 agent_id=agent_id,
                 instruction=message,
-                tool_executor=tool_executor,
                 output_format=output_format,
             )
 
@@ -391,9 +366,9 @@ def main() -> None:
     # Initialize auth adapter
     auth_adapter = APIKeyAuthAdapter(valid_key=api_key)
 
-    # Build tool executor and definitions
-    # When MCP is configured, cognitive-memory replaces memory tools entirely
-    # When MCP is not configured, fall back to basic memory tools
+    # Determine tool definitions
+    # When MCP is configured, cognitive-memory tools replace memory tools
+    # Tool execution is handled by the adapter (Claude Code natively, local via internal loop)
     mcp_server_path = os.environ.get("MCP_SERVER_PATH")
     mcp_memory_path = os.environ.get("MCP_MEMORY_PATH")
 
@@ -401,24 +376,8 @@ def main() -> None:
         logger.info(
             "MCP tools enabled: %s (memory: %s)", mcp_server_path, mcp_memory_path
         )
-        mcp_client = MCPStdioClient(
-            command="node",
-            args=[mcp_server_path],
-            env={"COGNITIVE_MEMORY_PATH": mcp_memory_path},
-        )
-        mcp_executor = MCPToolExecutor(mcp_client=mcp_client)
-
-        # MCP is the sole memory tool provider
-        all_executors = {
-            "read_entity": mcp_executor,
-            "write_entity": mcp_executor,
-            "list_entities": mcp_executor,
-            "add_session_note": mcp_executor,
-        }
-        tool_executor: ToolExecutor = CompositeToolExecutor(executors=all_executors)
         tools = _get_mcp_tool_definitions()
     else:
-        tool_executor = MemoryToolExecutor(memory=memory_service)
         tools = _get_memory_tool_definitions()
 
     # Create and run app
@@ -428,7 +387,6 @@ def main() -> None:
         prompt_adapter=prompt_adapter,
         prompt_names=prompt_names,
         auth=auth_adapter,
-        tool_executor=tool_executor,
         tools=tools,
     )
 

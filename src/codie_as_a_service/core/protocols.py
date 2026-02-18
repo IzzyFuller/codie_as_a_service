@@ -97,25 +97,6 @@ class PromptProtocol(Protocol):
 
 
 @runtime_checkable
-class ToolExecutor(Protocol):
-    """Abstract interface for tool execution."""
-
-    def execute(self, agent_id: str, tool_name: str, tool_input: dict[str, Any]) -> str:
-        """
-        Execute a tool and return the result as a string.
-
-        Args:
-            agent_id: Agent identifier for scoped operations
-            tool_name: Name of the tool to execute
-            tool_input: Input arguments for the tool
-
-        Returns:
-            Tool result as string
-        """
-        ...
-
-
-@runtime_checkable
 class AuthProtocol(Protocol):
     """Abstract interface for authentication."""
 

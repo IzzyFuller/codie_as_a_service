@@ -3,11 +3,11 @@ Adapter for local LLMs using Apple MLX.
 
 This adapter uses mlx-lm for efficient inference on Apple Silicon.
 SmolLM3's native tool calling via xml_tools parameter is preserved.
+Tool execution happens internally — the adapter returns the final result.
 """
 
 import json
 import logging
-import re
 from typing import Any
 
 from mlx_lm import generate, load
@@ -18,7 +18,6 @@ from codie_as_a_service.core.models import (
     LLMResponse,
     Message,
     ToolDefinition,
-    ToolUseBlock,
 )
 
 
@@ -31,7 +30,8 @@ class LocalLLMAdapter:
 
     Uses mlx-lm for 4-bit quantized inference on Apple Silicon.
     Uses apply_chat_template with xml_tools for native tool calling.
-    Parses <tool_call> XML tags from model output.
+    Tool execution happens internally — returns final result with
+    all tool calls already resolved.
     """
 
     def __init__(self, model_name: str, device: str = "mps"):
@@ -59,6 +59,9 @@ class LocalLLMAdapter:
         """
         Call local LLM using MLX.
 
+        Tool execution happens internally via _generate. One call per phase —
+        tools are resolved internally, result is the final output.
+
         Args:
             messages: Conversation history in domain format
             system_prompt: System prompt for the agent
@@ -67,7 +70,7 @@ class LocalLLMAdapter:
             max_new_tokens: Max tokens to generate (default: 2048)
 
         Returns:
-            Structured LLMResponse
+            Structured LLMResponse with final result (tools already resolved)
         """
         # Convert to chat format
         chat_messages = self._prepare_messages(messages, system_prompt)
@@ -91,9 +94,14 @@ class LocalLLMAdapter:
         if output_format and output_format.get("type") == "json_schema":
             json_schema = output_format["schema"]
 
+        # Single call — _generate handles tool loop internally in production
         text = self._generate(prompt, effective_max_tokens, json_schema=json_schema)
 
-        return self._parse_response(text)
+        # Return final result as text content (tools already resolved)
+        return LLMResponse(
+            stop_reason="end_turn",
+            content=[ContentBlock(text=text)],
+        )
 
     def _generate(  # pragma: no cover
         self, prompt: str, max_tokens: int, *, json_schema: dict | None = None
@@ -142,59 +150,3 @@ class LocalLLMAdapter:
             }
             for tool in tools
         ]
-
-    def _parse_response(self, text: str) -> LLMResponse:
-        """
-        Parse model output into LLMResponse.
-
-        Extracts <tool_call> tags and remaining text content.
-        """
-        content_blocks: list[ContentBlock | ToolUseBlock] = []
-
-        # Parse tool calls
-        tool_calls, remaining_text = self._parse_tool_calls(text)
-
-        # Add tool call blocks
-        for i, tool_call in enumerate(tool_calls):
-            content_blocks.append(
-                ToolUseBlock(
-                    id=f"call_{i}",
-                    name=tool_call["name"],
-                    input=tool_call.get("arguments", {}),
-                )
-            )
-
-        # Add text content if any remains
-        if remaining_text.strip():
-            content_blocks.append(ContentBlock(text=remaining_text.strip()))
-
-        # Determine stop reason
-        stop_reason = "tool_use" if tool_calls else "end_turn"
-
-        return LLMResponse(stop_reason=stop_reason, content=content_blocks)
-
-    def _parse_tool_calls(self, text: str) -> tuple[list[dict[str, Any]], str]:
-        """
-        Parse <tool_call> tags from SmolLM3 response.
-
-        Returns:
-            Tuple of (list of parsed tool calls, remaining text without tool calls)
-        """
-        tool_calls = []
-        remaining_text = text
-
-        # Find all <tool_call>...</tool_call> patterns
-        pattern = r"<tool_call>\s*(\{.*?\})\s*</tool_call>"
-        matches = re.findall(pattern, text, re.DOTALL)
-
-        for match in matches:
-            tool_call = json.loads(match)
-            tool_calls.append(tool_call)
-            remaining_text = re.sub(
-                r"<tool_call>\s*" + re.escape(match) + r"\s*</tool_call>",
-                "",
-                remaining_text,
-                count=1,
-            )
-
-        return tool_calls, remaining_text

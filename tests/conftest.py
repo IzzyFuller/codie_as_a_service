@@ -30,9 +30,7 @@ from codie_as_a_service.main_http import (
     _get_memory_tool_definitions,
     _build_orchestrator_phases,
 )
-from codie_as_a_service.services.agent.react_agent import ReActAgent
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
-from codie_as_a_service.services.tools.memory_tool_executor import MemoryToolExecutor
 
 # ============================================================================
 # Domain-Level Test Response Specs (Adapter-Agnostic)
@@ -327,20 +325,9 @@ def agent_app(
     Session-scoped to maintain RabbitMQ connection state.
     Uses dedicated pubsub_memory_service (not parameterized).
     """
-    # Build tool executor, tools, agent, and orchestrator
-    tool_executor = MemoryToolExecutor(memory=pubsub_memory_service)
     tools = _get_memory_tool_definitions()
-    agent = ReActAgent(
-        llm=pubsub_llm_adapter,
-        prompts=file_prompt_adapter,
-        memory=pubsub_memory_service,
-        prompt_names=["codie_as_a_service_system"],
-        tool_executor=tool_executor,
-        tools=tools,
-    )
     phases = _build_orchestrator_phases(file_prompt_adapter, tools)
     orchestrator = ReActOrchestrator(
-        react_agent=agent,
         llm=pubsub_llm_adapter,
         memory=pubsub_memory_service,
         phases=phases,
@@ -356,8 +343,6 @@ def agent_app(
         subscriber=rabbitmq_subscriber,
         request_subscription_path=REQUEST_SUBSCRIPTION,
         response_topic_path=RESPONSE_TOPIC,
-        tool_executor=tool_executor,
-        tools=tools,
         orchestrator=orchestrator,
     )
     app.start()
@@ -631,9 +616,6 @@ class TestApp:
 
     _response_counter = 0
 
-    # Phase default responses (schema-constrained JSON for each phase)
-    _TOOL_LOOP_EXIT = LLMResponseSpec(stop_reason="end_turn", content="done")
-
     _PHASE_DEFAULTS = {
         "hydrate": LLMResponseSpec(
             stop_reason="end_turn",
@@ -716,35 +698,16 @@ class TestApp:
         """
         self.stub_phases(process=list(responses), iterations=iterations)
 
-    def _build_non_tool_phase(
+    def _build_phase(
         self, schema_response: LLMResponseSpec
     ) -> list[LLMResponseSpec]:
-        """Build responses for a non-tool phase (HYDRATE, EXTEND, VALIDATE).
+        """Build responses for any phase.
 
-        Non-tool phases consume exactly 1 schema-constrained LLM call.
+        In the new architecture, each phase is exactly 1 adapter.call().
+        The adapter handles tool execution internally — the orchestrator
+        just sees the final schema-constrained result.
         """
         return [schema_response]
-
-    def _build_tool_phase(
-        self,
-        tool_loop_responses: list[LLMResponseSpec],
-        schema_response: LLMResponseSpec,
-    ) -> list[LLMResponseSpec]:
-        """Build responses for a tool-using phase (PROCESS, SYNTHESIZE).
-
-        Tool-using phases consume:
-        1. Tool loop calls (at least 1 end_turn to exit, plus any tool_use before it)
-        2. Schema-constrained call (structured JSON output)
-
-        The tool loop ALWAYS makes at least 1 LLM call, so empty responses
-        get a tool_loop_exit. Auto-appends tool_loop_exit if last response
-        is tool_use (loop needs end_turn to terminate).
-        """
-        segment = list(tool_loop_responses)
-        if not segment or segment[-1].stop_reason != "end_turn":
-            segment.append(self._TOOL_LOOP_EXIT)
-        segment.append(schema_response)
-        return segment
 
     def stub_phases(
         self,
@@ -759,16 +722,16 @@ class TestApp:
         """
         Configure LLM mock with per-phase response sequences.
 
-        Each phase accepts a list of LLMResponseSpec. Unspecified phases
-        get auto-generated defaults. Assembles a flat side_effect list
-        matching the orchestrator's call order.
+        In the new architecture, each phase is exactly 1 adapter.call().
+        The adapter handles tool execution internally — the orchestrator
+        just sees 1 call per phase returning the schema-constrained result.
 
         Args:
-            hydrate: Custom HYDRATE phase responses (non-tool, 1 schema call)
-            extend: Custom EXTEND phase responses (non-tool, 1 schema call)
-            process: Custom PROCESS phase responses (tool loop + schema call)
-            synthesize: Custom SYNTHESIZE phase responses (tool loop + schema call)
-            validate: Custom VALIDATE phase responses (non-tool, 1 schema call)
+            hydrate: Custom HYDRATE phase response (1 schema call)
+            extend: Custom EXTEND phase response (1 schema call)
+            process: Custom PROCESS phase response (1 schema call; adapter handles tools)
+            synthesize: Custom SYNTHESIZE phase response (1 schema call; adapter handles tools)
+            validate: Custom VALIDATE phase response (1 schema call)
             iterations: Number of orchestrator iterations (last validates pass)
         """
         # Derive content-dependent defaults from process responses
@@ -791,38 +754,36 @@ class TestApp:
         for i in range(iterations):
             is_last = i == iterations - 1
 
-            # HYDRATE (non-tool)
+            # HYDRATE — 1 call
             full_sequence.extend(
-                self._build_non_tool_phase(
+                self._build_phase(
                     hydrate[0] if hydrate else self._PHASE_DEFAULTS["hydrate"]
                 )
             )
 
-            # EXTEND (non-tool)
+            # EXTEND — 1 call
             full_sequence.extend(
-                self._build_non_tool_phase(
+                self._build_phase(
                     extend[0] if extend else self._PHASE_DEFAULTS["extend"]
                 )
             )
 
-            # PROCESS (tool-using)
-            process_loop = process if process else [self._TOOL_LOOP_EXIT]
-            full_sequence.extend(self._build_tool_phase(process_loop, process_schema))
+            # PROCESS — 1 call (adapter handles tools internally)
+            full_sequence.extend(self._build_phase(process_schema))
 
-            # SYNTHESIZE (tool-using)
-            synth_loop = synthesize if synthesize else []
-            full_sequence.extend(self._build_tool_phase(synth_loop, synthesize_schema))
+            # SYNTHESIZE — 1 call (adapter handles tools internally)
+            full_sequence.extend(self._build_phase(synthesize_schema))
 
-            # VALIDATE (non-tool)
+            # VALIDATE — 1 call
             if validate:
-                full_sequence.extend(self._build_non_tool_phase(validate[0]))
+                full_sequence.extend(self._build_phase(validate[0]))
             elif is_last:
                 full_sequence.extend(
-                    self._build_non_tool_phase(self._PHASE_DEFAULTS["validate_pass"])
+                    self._build_phase(self._PHASE_DEFAULTS["validate_pass"])
                 )
             else:
                 full_sequence.extend(
-                    self._build_non_tool_phase(self._PHASE_DEFAULTS["validate_fail"])
+                    self._build_phase(self._PHASE_DEFAULTS["validate_fail"])
                 )
 
         adapter_responses = [self._to_adapter_response(r) for r in full_sequence]
@@ -922,20 +883,17 @@ class TestApp:
         Convert domain-level spec to text that the adapter will parse.
 
         This is the ONLY place that knows about adapter response format.
-        - LocalLLMAdapter parses <tool_call> tags from text content.
-        - ClaudeCliAdapter parses {"tool_use": ...} JSON from text content.
+        - ClaudeCliAdapter: returns text directly (tools handled natively)
+        - LocalLLMAdapter: encodes tool calls as <tool_call> XML tags
         """
         content_parts = []
         if spec.content:
             content_parts.append(spec.content)
 
         if self._is_claude_cli:
-            # ClaudeCliAdapter format: {"tool_use": {"name": "...", "arguments": {...}}}
-            for tc in spec.tool_calls:
-                tool_call_json = json.dumps(
-                    {"tool_use": {"name": tc.name, "arguments": tc.arguments}}
-                )
-                content_parts.append(tool_call_json)
+            # ClaudeCliAdapter handles tools natively — just return text content.
+            # Tool calls in the spec are ignored (Claude Code resolves them internally).
+            pass
         else:
             # LocalLLMAdapter format: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
             for tc in spec.tool_calls:

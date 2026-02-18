@@ -12,7 +12,7 @@ If we change LLM adapters, only TestApp needs to change - not these tests.
 
 import pytest
 
-from tests.conftest import LLMResponseSpec, ToolCallSpec
+from tests.conftest import LLMResponseSpec
 
 
 @pytest.mark.integration
@@ -69,35 +69,23 @@ class TestE2EHTTPChat:
         error_data = error_events[0]["data"]
         assert "message" in error_data
 
-    def test_agent_writes_memory_when_tool_is_used(self, test_app):
+    def test_tool_using_request_completes_successfully(self, test_app):
         """
-        Given: Client sends a request that triggers write_memory tool
-        When: Agent processes the request and uses the tool
-        Then: Memory content is persisted (observable side effect)
+        Given: Client sends a request that would trigger tool use
+        When: Adapter processes the request (tool execution is internal)
+        Then: Client receives a successful response
 
-        This is E2E from client perspective: client sends message,
-        memory contains expected content afterward. Client doesn't
-        know HOW it happened, just that it DID happen.
+        Tool execution is an adapter concern — with mocked adapters,
+        we verify the flow completes. Real tool execution is tested
+        via adapter-specific integration tests.
         """
         agent_id, session_id = test_app.setup_agent()
 
-        # Configure PROCESS phase to use write_memory tool
         test_app.stub_phases(
             process=[
                 LLMResponseSpec(
-                    stop_reason="tool_use",
-                    content="I'll save that preference.",
-                    tool_calls=[
-                        ToolCallSpec(
-                            name="write_memory",
-                            arguments={
-                                "key": "current_session",
-                                "content": "# Session\n\nUser prefers dark mode.",
-                            },
-                        )
-                    ],
+                    stop_reason="end_turn", content="Got it, preference saved!"
                 ),
-                LLMResponseSpec(stop_reason="end_turn", content="Got it!"),
             ],
         )
 
@@ -105,24 +93,21 @@ class TestE2EHTTPChat:
         events = test_app.chat(agent_id, session_id, "Remember I prefer dark mode")
 
         # Request completed successfully
+        response_events = [e for e in events if e["event"] == "response"]
         done_events = [e for e in events if e["event"] == "done"]
+        assert len(response_events) == 1
         assert len(done_events) == 1
-
-        # E2E verification: memory contains the written content
-        content = test_app.read_memory(agent_id, "current_session")
-        assert "dark mode" in content
 
         test_app.reset_llm()
 
-    def test_agent_reads_memory_when_tool_is_used(self, test_app):
+    def test_request_completes_with_memory_context(self, test_app):
         """
         Given: User has specific content in memory
-        When: Client sends request that triggers read_memory tool
-        Then: Request completes (agent had access to memory content)
+        When: Client sends request (adapter has access to memory via tools)
+        Then: Request completes successfully
 
-        The E2E proof is that the tool execution path works.
-        We can't verify the response content (mock is predetermined),
-        but we verify the flow completes without error.
+        The adapter handles tool execution internally — we verify
+        the pipeline completes with pre-populated memory.
         """
         agent_id, session_id = test_app.setup_agent()
 
@@ -131,61 +116,16 @@ class TestE2EHTTPChat:
             agent_id, "current_session", "# Session\n\nWorking on PROJECT_ALPHA."
         )
 
-        # Configure PROCESS phase to use read_memory tool
         test_app.stub_phases(
             process=[
-                LLMResponseSpec(
-                    stop_reason="tool_use",
-                    content="Let me check.",
-                    tool_calls=[
-                        ToolCallSpec(
-                            name="read_memory", arguments={"key": "current_session"}
-                        )
-                    ],
-                ),
                 LLMResponseSpec(
                     stop_reason="end_turn", content="You're on PROJECT_ALPHA."
                 ),
             ],
         )
 
-        # Client sends request
         events = test_app.chat(agent_id, session_id, "What am I working on?")
 
-        # Request completed successfully (tool execution worked)
-        done_events = [e for e in events if e["event"] == "done"]
-        assert len(done_events) == 1
-
-        test_app.reset_llm()
-
-    def test_agent_stops_at_max_iterations(self, test_app):
-        """
-        Given: LLM keeps requesting tool use indefinitely
-        When: Agent reaches max iterations limit
-        Then: Request completes (doesn't hang forever)
-
-        This tests the safety mechanism from client perspective:
-        even if something goes wrong, client gets a response.
-        """
-        agent_id, session_id = test_app.setup_agent()
-
-        # Configure PROCESS phase to always request tool use (infinite loop scenario)
-        tool_loop_response = LLMResponseSpec(
-            stop_reason="tool_use",
-            content="Let me check more...",
-            tool_calls=[
-                ToolCallSpec(name="read_memory", arguments={"key": "current_session"})
-            ],
-        )
-
-        test_app.stub_phases(
-            process=[tool_loop_response] * 10,
-        )
-
-        # Client sends request
-        events = test_app.chat(agent_id, session_id, "Help me")
-
-        # Request completed (agent stopped at max iterations)
         done_events = [e for e in events if e["event"] == "done"]
         assert len(done_events) == 1
 
@@ -194,7 +134,7 @@ class TestE2EHTTPChat:
     def test_structured_output_returns_structured_event(self, test_app):
         """
         Given: Client sends request with output_format schema
-        When: Agent processes with two-phase approach (ReAct loop then structure output)
+        When: Agent processes the request
         Then: Client receives SSE stream with response event containing JSON data
         """
         agent_id, session_id = test_app.setup_agent()
@@ -282,43 +222,6 @@ class TestE2EHTTPChat:
             api_key="wrong-key",
         )
         assert response.status_code == 401
-
-    def test_agent_lists_memory_keys_when_tool_is_used(self, test_app):
-        """
-        Given: User has multiple memory keys
-        When: Client sends request that triggers list_memory_keys tool
-        Then: Request completes (agent had access to key list)
-
-        This E2E test exercises list_memory_keys on the storage adapter.
-        """
-        agent_id, session_id = test_app.setup_agent()
-
-        # Pre-populate memory with multiple keys
-        test_app.write_memory(agent_id, "current_session", "# Session")
-        test_app.write_memory(agent_id, "notes", "# Notes")
-
-        # Configure PROCESS phase to use list_memory_keys tool
-        test_app.stub_phases(
-            process=[
-                LLMResponseSpec(
-                    stop_reason="tool_use",
-                    content="Let me list your memory keys.",
-                    tool_calls=[ToolCallSpec(name="list_memory_keys", arguments={})],
-                ),
-                LLMResponseSpec(
-                    stop_reason="end_turn", content="You have: current_session, notes"
-                ),
-            ],
-        )
-
-        # Client sends request
-        events = test_app.chat(agent_id, session_id, "What memory keys do I have?")
-
-        # Request completed successfully (tool execution worked)
-        done_events = [e for e in events if e["event"] == "done"]
-        assert len(done_events) == 1
-
-        test_app.reset_llm()
 
     def test_request_completes_when_validation_needs_retry(self, test_app):
         """

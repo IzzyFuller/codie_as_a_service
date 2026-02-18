@@ -4,16 +4,9 @@ import json
 import logging
 from pydantic import BaseModel
 
-from codie_as_a_service.core.models import (
-    ContentBlock,
-    Message,
-)
-from codie_as_a_service.core.phase_models import (
-    PhaseDefinition,
-    SessionContext,
-)
-from codie_as_a_service.core.protocols import LLMProtocol, ToolExecutor
-from codie_as_a_service.services.agent.react_agent import ReActAgent
+from codie_as_a_service.core.models import ContentBlock, Message
+from codie_as_a_service.core.phase_models import PhaseDefinition, SessionContext
+from codie_as_a_service.core.protocols import LLMProtocol
 from codie_as_a_service.services.memory.memory_service import MemoryService
 
 logger = logging.getLogger(__name__)
@@ -24,19 +17,18 @@ class ReActOrchestrator:
     Multi-phase orchestration loop.
 
     Runs phases in sequence per iteration, checks validation for completion,
-    loops back when not done.
+    loops back when not done. Each phase is a single adapter.call() —
+    the adapter handles tool execution internally.
     """
 
     def __init__(
         self,
-        react_agent: ReActAgent,
         llm: LLMProtocol,
         memory: MemoryService,
         phases: list[PhaseDefinition],
         max_outer_iterations: int = 3,
         session_lines: int | None = 50,
     ) -> None:
-        self._react_agent = react_agent
         self._llm = llm
         self._memory = memory
         self._phases = phases
@@ -48,7 +40,6 @@ class ReActOrchestrator:
         session_id: str,
         agent_id: str,
         instruction: str,
-        tool_executor: ToolExecutor,
         output_format: type[BaseModel] | None = None,
     ) -> BaseModel:
         """
@@ -60,7 +51,6 @@ class ReActOrchestrator:
         if output_format is None:
             output_format = SessionContext
 
-        # Load identity context for this agent
         identity = self._memory.get_identity_context(
             agent_id=agent_id, session_lines=self._session_lines
         )
@@ -82,7 +72,7 @@ class ReActOrchestrator:
             context.iteration = iteration
 
             for phase in self._phases:
-                self._execute_phase(phase, context, tool_executor)
+                self._execute_phase(phase, context)
 
                 if context.done:
                     return output_format.model_validate(context.model_dump())
@@ -95,29 +85,17 @@ class ReActOrchestrator:
 
         return output_format.model_validate(context.model_dump())
 
-    def _execute_phase(
-        self,
-        phase: PhaseDefinition,
-        context: SessionContext,
-        tool_executor: ToolExecutor,
-    ) -> None:
-        """Execute a single phase, updating context with results."""
+    def _execute_phase(self, phase: PhaseDefinition, context: SessionContext) -> None:
+        """Execute a single phase with one adapter.call().
+
+        The adapter handles tool execution internally. The orchestrator
+        just passes tools + output_format and gets back the final result.
+        """
         logger.info("Phase %s starting (iteration %d)", phase.name, context.iteration)
         phase_input = context.model_dump_json()
         messages = [Message(role="user", content=phase_input)]
 
-        # Tool-using phases: run tool loop first to enrich messages
-        if phase.tools:
-            messages = self._react_agent.run_tool_loop(
-                system_prompt=phase.system_prompt,
-                messages=messages,
-                tools=phase.tools,
-                tool_executor=tool_executor,
-                agent_id=context.agent_id,
-                max_new_tokens=phase.max_new_tokens,
-            )
-
-        # Schema-constrained call — always
+        # Single call per phase — adapter handles tools internally
         output_format = {
             "type": "json_schema",
             "schema": phase.output_schema.model_json_schema(),
@@ -125,7 +103,7 @@ class ReActOrchestrator:
         response = self._llm.call(
             messages=messages,
             system_prompt=phase.system_prompt,
-            tools=None,
+            tools=phase.tools if phase.tools else None,
             output_format=output_format,
             max_new_tokens=phase.max_new_tokens,
         )
@@ -136,10 +114,8 @@ class ReActOrchestrator:
                 text_parts.append(block.text)
 
         text_result = " ".join(text_parts)
-        logger.info("Phase %s got LLM response: %.200s", phase.name, text_result)
         result = self._parse_phase_output(text_result, phase.output_schema)
 
-        # Phase updates context
         if phase.sets_identity_from:
             context.identity_summary = getattr(result, phase.sets_identity_from)
         if phase.sets_response_from:
@@ -150,8 +126,7 @@ class ReActOrchestrator:
     def _parse_phase_output(
         self, text: str, output_schema: type[BaseModel]
     ) -> BaseModel:
-        """Parse text output into the phase's Pydantic model."""
+        """Parse phase output text into the expected schema model."""
         text = text.strip()
-        logger.debug("Parsing %s output: %.500s", output_schema.__name__, text)
         data = json.loads(text)
         return output_schema(**data)

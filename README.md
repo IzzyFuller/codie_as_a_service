@@ -27,7 +27,7 @@ codie_as_a_service/
 │   │   ├── auth/             # Authentication adapters
 │   │   ├── llm/              # LLM adapters (Claude CLI, Local Transformers)
 │   │   ├── prompts/          # File-based prompt templates
-│   │   ├── storage/          # Storage adapters (Local, GCS)
+│   │   ├── storage/          # Local filesystem storage adapter
 │   │   └── messaging/        # RabbitMQ adapter
 │   └── api/                  # Entry points
 └── tests/                    # Mirror structure for tests
@@ -51,19 +51,18 @@ codie_as_a_service/
 - **Claude CLI**: Uses Claude Code CLI (`claude -p`) - recommended for local dev
 - **Transformers**: Native HuggingFace model loading (supports local models like SmolLM3)
 
-### Storage Adapters
-- **Local**: Filesystem storage - no cloud dependencies
-- **Google Cloud Storage**: Production-ready cloud storage
+### Storage
+- **Local Filesystem**: File-based memory storage with configurable path templates
 
 ### Dev Dependencies
 - **pytest**: Testing framework with coverage and async support
 - **ruff**: Fast linting and formatting
 - **mypy**: Static type checking
-- **Docker**: GCS emulator and RabbitMQ for integration tests
+- **Docker**: RabbitMQ for integration tests
 
 ## POC Feature Scope
 
-### ✅ In Scope (Minimal Viable Feature Set)
+### In Scope (Minimal Viable Feature Set)
 
 1. **Agent Identity & Isolation**: Each agent gets unique `agent_id` with isolated memory
 2. **Basic Memory System**:
@@ -78,7 +77,7 @@ codie_as_a_service/
 5. **Tool System**: 3 tools (read_memory, write_memory, + 1 domain tool)
 6. **Message Handler**: Process RunAgentRequest from Pub/Sub
 
-### ⛔ Out of Scope (Future Enhancements)
+### Out of Scope (Future Enhancements)
 
 - Customer-level multi-tenancy (`customer_id`)
 - Advanced memory (deep merge, semantic search, compaction)
@@ -95,7 +94,7 @@ codie_as_a_service/
 - **Python 3.13.x** - Required (strict version constraint)
 - **uv** - Package manager ([install guide](https://docs.astral.sh/uv/getting-started/installation/))
 - **Claude Code CLI** - For `claude_cli` LLM adapter ([install guide](https://docs.anthropic.com/en/docs/claude-code))
-- **Docker** - Only needed for running tests or GCS emulator mode
+- **Docker** - Only needed for running Pub/Sub integration tests
 
 ### Installation
 
@@ -118,16 +117,13 @@ See `.env.example` for all available options. Key settings:
 
 ```bash
 # Required
-API_KEY=your-secret-api-key        # For HTTP endpoint authentication
-MODEL_NAME=HuggingFaceTB/SmolLM3-3B  # Or any HuggingFace model
-DEVICE=mps                          # mps (Apple Silicon), cuda, or cpu
+STORAGE_DIR=./data/agents           # Where agent memory is stored
+API_KEY=your-secret-api-key         # For HTTP endpoint authentication
 ```
 
 ## Running Locally
 
-The easiest way to run codie-as-a-service locally without Docker or cloud dependencies.
-
-### Quick Start (Local Mode)
+### Quick Start
 
 ```bash
 # 1. Copy and configure environment
@@ -171,7 +167,6 @@ uv run --group demo python demo/app.py
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `STORAGE_ADAPTER` | `gcs` | `local` or `gcs` |
 | `STORAGE_DIR` | `./data/agents` | Path for local storage |
 | `LLM_ADAPTER` | `claude_cli` | `claude_cli` or `local` |
 | `MODEL_NAME` | - | HuggingFace model (when `LLM_ADAPTER=local`) |
@@ -179,24 +174,6 @@ uv run --group demo python demo/app.py
 | `API_KEY` | - | API key for authentication |
 
 See `.env.example` for all options.
-
-## Running with Emulators
-
-For testing with GCS emulator (matches production infrastructure):
-
-### Quick Start (Emulator Mode)
-
-```bash
-# 1. Start emulators and create demo user
-./demo/setup-infrastructure.sh
-
-# 2. Run the HTTP streaming demo with Gradio UI
-./demo/run-http-demo.sh
-# Opens at http://localhost:7860
-
-# 3. Or run the Pub/Sub CLI demo
-./demo/run-pubsub-demo.sh
-```
 
 ### HTTP Streaming API
 
@@ -230,28 +207,6 @@ curl -X POST http://localhost:8080/chat \
 
 Note: The `/chat` endpoint requires authentication via `X-API-Key` header. The `/health` endpoint is open.
 
-### Gradio UI
-
-The demo includes a web interface for interactive testing:
-- Real-time streaming responses
-- Agent ID switching (test different memory contexts)
-- Conversation history display
-
-### Memory Sync Scripts
-
-For advanced users testing with custom memory:
-
-```bash
-# Set path to your local memory directory
-export CODIE_MEMORY_PATH=/path/to/your/memory
-
-# Copy memory entities to a GCS user
-./scripts/copy-codie-memory.sh demo-user
-
-# Sync session notes back from GCS to local
-python scripts/sync-memory-from-gcs.py demo-user
-```
-
 ## Testing
 
 ### Running Tests
@@ -269,9 +224,8 @@ uv run pytest -v
 
 ### Test Strategy
 
-- **Mock at boundaries**: GCS, LLM model, RabbitMQ
+- **Mock at boundaries**: LLM model, RabbitMQ
 - **Don't mock our logic**: ReAct loop, memory service, tool registry
-- **Emulators**: Docker-based GCS and RabbitMQ for integration tests
 - **TestApp abstraction**: Adapter-agnostic test interface
 
 ### Code Quality
@@ -289,16 +243,15 @@ uv run mypy src/
 
 ## Memory Structure
 
-Each agent gets isolated memory in GCS:
+Each agent gets isolated memory on the local filesystem:
 
 ```
-gs://deep-agent-memory-{env}/
-└── agents/
-    └── {agent_id}/
-        ├── current_session.md       # Working memory
-        ├── context_anchors.md       # Priority context
-        └── conversations/
-            └── {session_id}.json    # Conversation history
+data/agents/
+└── {agent_id}/
+    ├── current_session.md       # Working memory
+    ├── context_anchors.md       # Priority context
+    └── conversations/
+        └── {session_id}.json    # Conversation history
 ```
 
 ## Development Workflow
@@ -318,7 +271,7 @@ gs://deep-agent-memory-{env}/
 - ReAct agent with tool calling (read/write memory)
 - HTTP streaming API with API key authentication
 - RabbitMQ pub/sub messaging
-- 50 tests with 100% coverage
+- 44 tests with 100% coverage
 
 ## Contributing
 

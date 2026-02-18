@@ -3,6 +3,7 @@
 import json
 import os
 import subprocess
+
 import tempfile
 import time
 import uuid
@@ -12,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pika
 import pytest
-from google.cloud import firestore, storage
+from google.cloud import firestore
 
 from starlette.testclient import TestClient as StarletteTestClient
 
@@ -20,7 +21,6 @@ from synapse.adapters.rabbitmq import RabbitMQPublisher, RabbitMQSubscriber
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
 from codie_as_a_service.core.models import RunAgentRequest, AgentResponse
 from codie_as_a_service.services.memory.memory_service import MemoryService
-from codie_as_a_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
 from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
 from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 from codie_as_a_service.adapters.llm.claude_cli_adapter import ClaudeCliAdapter
@@ -64,10 +64,8 @@ class LLMResponseSpec:
 
 # Test configuration
 PROJECT_ID = "test-project"
-GCS_BUCKET_NAME = "test-deep-agent-memory"
 RABBITMQ_PORT = 5672
 FIRESTORE_EMULATOR_PORT = 8086
-GCS_EMULATOR_PORT = 4443
 # Domain-level messaging constants (adapter translates to implementation)
 REQUEST_SUBSCRIPTION = "agent.requests"
 RESPONSE_SUBSCRIPTION = "agent.responses"
@@ -173,54 +171,6 @@ def firestore_emulator():
 
 
 @pytest.fixture(scope="session")
-def gcs_emulator():
-    """Start GCS emulator, or reuse existing service on port."""
-    started_container = False
-
-    if not _port_is_reachable("localhost", GCS_EMULATOR_PORT):
-        try:
-            subprocess.run(
-                ["docker", "rm", "-f", "gcs-emulator-test"], capture_output=True
-            )
-            subprocess.run(
-                [
-                    "docker",
-                    "run",
-                    "-d",
-                    "--name",
-                    "gcs-emulator-test",
-                    "-p",
-                    f"{GCS_EMULATOR_PORT}:4443",
-                    "fsouza/fake-gcs-server",
-                    "-scheme",
-                    "http",
-                    "-port",
-                    "4443",
-                ],
-                check=True,
-                capture_output=True,
-            )
-            time.sleep(3)
-            started_container = True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pytest.skip(f"GCS emulator not available on port {GCS_EMULATOR_PORT}")
-
-    os.environ["STORAGE_EMULATOR_HOST"] = f"http://localhost:{GCS_EMULATOR_PORT}"
-
-    yield
-
-    if started_container:
-        subprocess.run(["docker", "stop", "gcs-emulator-test"], capture_output=True)
-        subprocess.run(["docker", "rm", "gcs-emulator-test"], capture_output=True)
-    os.environ.pop("STORAGE_EMULATOR_HOST", None)
-
-
-# ============================================================================
-# Google Cloud Client Fixtures (Connected to Emulators)
-# ============================================================================
-
-
-@pytest.fixture(scope="session")
 def rabbitmq_connection(rabbitmq_broker) -> pika.BlockingConnection:
     """Provide RabbitMQ connection."""
     return pika.BlockingConnection(
@@ -247,21 +197,6 @@ def firestore_client(firestore_emulator) -> firestore.Client:
 
 
 @pytest.fixture(scope="session")
-def gcs_client(gcs_emulator) -> storage.Client:
-    """Provide GCS client connected to emulator."""
-    return storage.Client(project=PROJECT_ID)
-
-
-@pytest.fixture(scope="session")
-def gcs_bucket(gcs_client) -> storage.Bucket:
-    """Create and provide test GCS bucket."""
-    bucket = gcs_client.bucket(GCS_BUCKET_NAME)
-    if not bucket.exists():
-        bucket = gcs_client.create_bucket(GCS_BUCKET_NAME)
-    return bucket
-
-
-@pytest.fixture(scope="session")
 def rabbitmq_infrastructure(rabbitmq_connection):
     """Create messaging infrastructure for tests."""
     channel = rabbitmq_connection.channel()
@@ -282,68 +217,33 @@ def rabbitmq_infrastructure(rabbitmq_connection):
 
 
 # ============================================================================
-# Storage Adapter Parameterization (Class + Init Args Pattern)
+# Storage Adapter Fixtures
 # ============================================================================
 
 
-@pytest.fixture(
-    scope="function",
-    params=[
-        pytest.param(
-            {
-                "class": LocalMemoryAdapter,
-                "kwargs_factory": lambda gcs_bucket, tmp_path: {
-                    "base_dir": str(tmp_path)
-                },
-            },
-            id="local",
-        ),
-        pytest.param(
-            {
-                "class": GCSMemoryAdapter,
-                "kwargs_factory": lambda gcs_bucket, tmp_path: {"bucket": gcs_bucket},
-            },
-            id="gcs",
-        ),
-    ],
-)
-def storage_adapter_config(request):
-    """Parameterized storage adapter configuration.
-
-    Returns dict with 'class' and 'kwargs_factory' for deferred instantiation.
-    """
-    return request.param
-
-
 @pytest.fixture(scope="function")
-def storage_adapter(storage_adapter_config, gcs_bucket, tmp_path):
-    """Instantiate storage adapter from parameterized config.
+def storage_adapter(tmp_path):
+    """Provide LocalMemoryAdapter for test isolation.
 
-    Function-scoped to ensure test isolation between parameter runs.
+    Function-scoped to ensure each test gets a fresh adapter.
     """
-    config = storage_adapter_config
-    kwargs = config["kwargs_factory"](gcs_bucket, tmp_path)
-    return config["class"](**kwargs)
+    return LocalMemoryAdapter(base_dir=str(tmp_path))
 
 
 @pytest.fixture(scope="function")
 def memory_service(storage_adapter):
-    """Create memory service with parameterized storage adapter.
+    """Create memory service with local storage adapter.
 
     Function-scoped - each test gets fresh MemoryService instance.
-    Runs tests against both LocalMemoryAdapter and GCSMemoryAdapter
-    to maintain coverage on both implementations.
     """
     return MemoryService(storage=storage_adapter)
 
 
 @pytest.fixture(scope="session")
-def pubsub_memory_service(gcs_bucket):
+def pubsub_memory_service():
     """Session-scoped memory service for pubsub tests.
 
     Pubsub tests exercise the messaging layer, not storage adapters.
-    Uses LocalMemoryAdapter to avoid GCS emulator complexity.
-    HTTP tests handle parameterized storage adapter coverage.
     """
     temp_dir = tempfile.mkdtemp(prefix="pubsub_test_memory_")
     return MemoryService(storage=LocalMemoryAdapter(base_dir=temp_dir))

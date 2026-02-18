@@ -17,12 +17,7 @@ if [ ! -f demo/demo.env ]; then
     exit 1
 fi
 
-# Check if emulators are running
-if ! docker ps --format '{{.Names}}' | grep -q "^gcs-emulator-demo$"; then
-    echo "ERROR: GCS emulator not running. Run ./demo/setup-infrastructure.sh first"
-    exit 1
-fi
-
+# Check if Pub/Sub emulator is running
 if ! docker ps --format '{{.Names}}' | grep -q "^pubsub-emulator-demo$"; then
     echo "ERROR: Pub/Sub emulator not running. Run ./demo/setup-infrastructure.sh first"
     exit 1
@@ -56,7 +51,7 @@ echo "==========================================="
 echo "  Starting Pub/Sub CLI Demo"
 echo "==========================================="
 echo ""
-echo "  GCS Emulator:   $STORAGE_EMULATOR_HOST"
+echo "  Storage:        local ($STORAGE_DIR)"
 echo "  Pub/Sub:        $PUBSUB_EMULATOR_HOST"
 echo "  User:           demo-user"
 echo ""

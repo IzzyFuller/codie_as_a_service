@@ -38,9 +38,6 @@ htmlcov/
 .tox/
 .nox/
 
-# Mutation testing
-mutants/
-
 # Type checking
 .mypy_cache/
 .dmypy.json

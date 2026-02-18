@@ -10,7 +10,6 @@ import threading
 
 import pika
 from dotenv import load_dotenv
-from google.cloud import storage
 from synapse.consumer.message_consumer import MessageConsumer
 from synapse.protocols.publisher import PubSubPublisher
 from synapse.protocols.subscriber import PubSubSubscriber
@@ -23,7 +22,6 @@ from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
 from codie_as_a_service.core.models import ToolDefinition
 from codie_as_a_service.core.protocols import ToolExecutor
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
-from codie_as_a_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
 from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
 from codie_as_a_service.core.models import RunAgentRequest
 from codie_as_a_service.core.protocols import LLMProtocol, MemoryProtocol
@@ -129,7 +127,6 @@ def create_app(
 def main() -> None:
     """Start the message consumer."""
     # Configuration from environment
-    storage_adapter_type = os.environ.get("STORAGE_ADAPTER", "gcs")
     llm_adapter_type = os.environ.get("LLM_ADAPTER", "claude_cli")
 
     prompts_dir = os.environ.get("PROMPTS_DIR")
@@ -150,21 +147,11 @@ def main() -> None:
     publisher = RabbitMQPublisher(connection)
     subscriber = RabbitMQSubscriber(connection)
 
-    # Initialize storage adapter based on type
-    if storage_adapter_type == "gcs":
-        gcs_bucket_name = os.environ.get("GCS_BUCKET_NAME")
-        if not gcs_bucket_name:
-            raise ValueError("GCS_BUCKET_NAME required when STORAGE_ADAPTER=gcs")
-        gcs_client = storage.Client()
-        bucket = gcs_client.bucket(gcs_bucket_name)
-        storage_adapter: MemoryProtocol = GCSMemoryAdapter(bucket=bucket)
-    elif storage_adapter_type == "local":
-        storage_dir = os.environ.get("STORAGE_DIR")
-        if not storage_dir:
-            raise ValueError("STORAGE_DIR required when STORAGE_ADAPTER=local")
-        storage_adapter = LocalMemoryAdapter(base_dir=storage_dir)
-    else:
-        raise ValueError(f"Unknown STORAGE_ADAPTER: {storage_adapter_type}")
+    # Initialize storage adapter
+    storage_dir = os.environ.get("STORAGE_DIR")
+    if not storage_dir:
+        raise ValueError("STORAGE_DIR environment variable is required")
+    storage_adapter: MemoryProtocol = LocalMemoryAdapter(base_dir=storage_dir)
 
     # Initialize LLM adapter based on type
     if llm_adapter_type == "claude_cli":

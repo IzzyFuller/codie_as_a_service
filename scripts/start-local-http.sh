@@ -24,7 +24,6 @@ if [ -f .env ]; then
 fi
 
 # Set defaults for local mode
-export STORAGE_ADAPTER=${STORAGE_ADAPTER:-local}
 export STORAGE_DIR=${STORAGE_DIR:-./data/agents}
 export LLM_ADAPTER=${LLM_ADAPTER:-claude_cli}
 export HTTP_HOST=${HTTP_HOST:-0.0.0.0}
@@ -56,7 +55,7 @@ echo "==========================================="
 echo "  Starting HTTP Server (Local Mode)"
 echo "==========================================="
 echo ""
-echo "  Storage:   $STORAGE_ADAPTER ($STORAGE_DIR)"
+echo "  Storage:   local ($STORAGE_DIR)"
 echo "  LLM:       $LLM_ADAPTER"
 echo "  API:       http://localhost:$HTTP_PORT"
 echo "  API Key:   $API_KEY"

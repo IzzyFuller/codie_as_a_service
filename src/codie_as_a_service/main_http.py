@@ -9,14 +9,12 @@ import uvicorn
 from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import StreamingResponse
-from google.cloud import storage
 from pydantic import BaseModel
 
 from codie_as_a_service.adapters.auth.api_key_adapter import APIKeyAuthAdapter
 from codie_as_a_service.adapters.llm.claude_cli_adapter import ClaudeCliAdapter
 from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
-from codie_as_a_service.adapters.storage.gcs_adapter import GCSMemoryAdapter
 from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
 from codie_as_a_service.core.protocols import (
     AuthProtocol,
@@ -337,8 +335,6 @@ def _build_orchestrator_phases(
 def main() -> None:
     """Start the HTTP server."""
     # Configuration from environment
-    storage_adapter_type = os.environ.get("STORAGE_ADAPTER", "gcs")
-
     host = os.environ.get("HTTP_HOST")
     if not host:
         raise ValueError("HTTP_HOST environment variable is required")
@@ -367,25 +363,13 @@ def main() -> None:
     # Set to empty string for flat directory (base_dir IS agent dir)
     storage_path_template = os.environ.get("STORAGE_PATH_TEMPLATE", "agents/{agent_id}")
 
-    # Initialize storage adapter based on type
-    if storage_adapter_type == "gcs":
-        gcs_bucket_name = os.environ.get("GCS_BUCKET_NAME")
-        if not gcs_bucket_name:
-            raise ValueError("GCS_BUCKET_NAME required when STORAGE_ADAPTER=gcs")
-        gcs_client = storage.Client()
-        bucket = gcs_client.bucket(gcs_bucket_name)
-        storage_adapter: MemoryProtocol = GCSMemoryAdapter(
-            bucket=bucket, agent_path_template=storage_path_template
-        )
-    elif storage_adapter_type == "local":
-        storage_dir = os.environ.get("STORAGE_DIR")
-        if not storage_dir:
-            raise ValueError("STORAGE_DIR required when STORAGE_ADAPTER=local")
-        storage_adapter = LocalMemoryAdapter(
-            base_dir=storage_dir, agent_path_template=storage_path_template
-        )
-    else:
-        raise ValueError(f"Unknown STORAGE_ADAPTER: {storage_adapter_type}")
+    # Initialize storage adapter
+    storage_dir = os.environ.get("STORAGE_DIR")
+    if not storage_dir:
+        raise ValueError("STORAGE_DIR environment variable is required")
+    storage_adapter: MemoryProtocol = LocalMemoryAdapter(
+        base_dir=storage_dir, agent_path_template=storage_path_template
+    )
 
     # Initialize LLM adapter based on type
     if llm_adapter_type == "claude_cli":

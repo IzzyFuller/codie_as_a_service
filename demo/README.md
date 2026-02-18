@@ -8,7 +8,7 @@ Both demonstrate per-agent memory persistence.
 
 ## Prerequisites
 
-- Docker installed and running
+- Docker installed and running (for Pub/Sub emulator)
 - Main dependencies installed: `uv sync` (from repo root)
 - `.env` file configured (copy from `.env.example`)
 - Local LLM model downloaded (e.g., SmolLM3-3B via HuggingFace)
@@ -22,11 +22,9 @@ set -a && source .env && set +a && ./demo/run-http-demo.sh
 ```
 
 This single command:
-1. Starts GCS emulator (Docker container)
-2. Creates the memory bucket
-3. Loads the local LLM model
-4. Starts the HTTP service (port 8080)
-5. Starts the Gradio demo UI (port 7860)
+1. Loads the local LLM model
+2. Starts the HTTP service (port 8080)
+3. Starts the Gradio demo UI (port 7860)
 
 Then open http://localhost:7860
 
@@ -37,16 +35,19 @@ Press `Ctrl+C` to stop all services.
 From the **repo root**:
 
 ```bash
+# 1. Set up infrastructure first
+./demo/setup-infrastructure.sh
+
+# 2. Run the demo
 set -a && source .env && set +a && ./demo/run-pubsub-demo.sh
 ```
 
-This single command:
-1. Starts GCS emulator (Docker container)
-2. Starts RabbitMQ (Docker container)
-3. Creates queues and exchanges
-4. Creates demo agent
-5. Starts the RabbitMQ agent service
-6. Launches CLI client
+This:
+1. Starts RabbitMQ (Docker container)
+2. Creates queues and exchanges
+3. Creates demo agent
+4. Starts the RabbitMQ agent service
+5. Launches CLI client
 
 Type messages at the `You:` prompt. Use `/quit` to exit.
 
@@ -57,9 +58,8 @@ Press `Ctrl+C` to stop all services.
 Create a `.env` file in the repo root (see `.env.example`):
 
 ```bash
-# Required - Local LLM
-MODEL_NAME=HuggingFaceTB/SmolLM3-3B
-DEVICE=mps  # mps (Apple Silicon), cuda, or cpu
+# Required - Storage
+STORAGE_DIR=./data/agents
 
 # Required - Authentication
 API_KEY=your-secret-api-key
@@ -71,7 +71,6 @@ PROMPT_NAMES=codie_as_a_service_system
 # Optional - Override defaults
 HTTP_HOST=0.0.0.0
 HTTP_PORT=8080
-GCS_BUCKET_NAME=deep-agent-memory
 ```
 
 ## Demo Features
@@ -90,12 +89,6 @@ GCS_BUCKET_NAME=deep-agent-memory
 
 ## Troubleshooting
 
-**Docker not running:**
-```
-ERROR: GCS emulator failed to start
-```
-Start Docker and try again.
-
 **Missing dependencies:**
 ```
 ModuleNotFoundError: No module named 'gradio'
@@ -103,7 +96,7 @@ ModuleNotFoundError: No module named 'gradio'
 Run `uv sync --group demo` from repo root.
 
 **Port already in use:**
-Check for existing processes on ports 4443, 5672, 8080, or 7860.
+Check for existing processes on ports 5672, 8080, or 7860.
 
 **Model loading slow:**
 First run downloads the model from HuggingFace. Subsequent runs use cached model.
@@ -123,8 +116,8 @@ User Browser (localhost:7860)
        │
        ├──▶ Local LLM (Transformers)
        │
-       └──▶ GCS Emulator (localhost:4443)
-            └── agents/{agent_id}/*.md
+       └──▶ Local Filesystem (./data/agents/)
+            └── {agent_id}/*.md
 ```
 
 ### Pub/Sub Message-Driven (Option 2)
@@ -145,8 +138,8 @@ User Browser (localhost:7860)
        │
        ├──▶ Local LLM (Transformers)
        │
-       ├──▶ GCS Emulator (localhost:4443)
-       │         └── agents/{agent_id}/*.md
+       ├──▶ Local Filesystem (./data/agents/)
+       │         └── {agent_id}/*.md
        │
        │ publish response
        ▼

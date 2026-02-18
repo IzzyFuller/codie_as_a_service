@@ -42,6 +42,25 @@ demo = [
     "httpx (>=0.28.1,<0.29.0)"
 ]
 
+[tool.mutmut]
+paths_to_mutate = ["src/"]
+tests_dir = ["tests/"]
+do_not_mutate = [
+    "src/codie_as_a_service/__init__.py",
+    "*/protocols.py",
+    "*/main_http.py",
+    "*/main_pubsub.py",
+    "*/mcp_client.py",
+]
+pytest_add_cli_args = [
+    "-p", "no:cacheprovider",
+    "--no-header",
+    "-p", "no:cov",
+    "--override-ini=addopts=",
+    "--ignore=tests/integration/test_e2e_agent_pubsub.py",
+    "--ignore=tests/integration/test_mcp_tools.py",
+]
+
 [tool.coverage.run]
 omit = [
     "**/__init__.py",

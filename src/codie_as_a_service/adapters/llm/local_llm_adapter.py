@@ -6,7 +6,6 @@ SmolLM3's native tool calling via xml_tools parameter is preserved.
 Tool execution happens internally — the adapter returns the final result.
 """
 
-import json
 import logging
 from typing import Any
 

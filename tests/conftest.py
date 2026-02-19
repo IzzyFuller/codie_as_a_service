@@ -690,9 +690,7 @@ class TestApp:
         """
         self.stub_phases(process=list(responses), iterations=iterations)
 
-    def _build_phase(
-        self, schema_response: LLMResponseSpec
-    ) -> list[LLMResponseSpec]:
+    def _build_phase(self, schema_response: LLMResponseSpec) -> list[LLMResponseSpec]:
         """Build responses for any phase.
 
         In the new architecture, each phase is exactly 1 adapter.call().

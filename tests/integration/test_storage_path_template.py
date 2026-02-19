@@ -82,5 +82,3 @@ class TestLocalMemoryAdapterPathTemplate:
         adapter = LocalMemoryAdapter(base_dir=tmp_path, agent_path_template="")
 
         assert adapter.read_file(agent_id="any", key="nonexistent") is None
-
-

@@ -78,6 +78,7 @@ class SynthesizePhaseDefinition:
         )
         entry = (
             f"\n\n## Interaction (iteration {context.iteration})\n"
+            f"**Session:** {context.session_id}\n"
             f"**Instruction:** {context.instruction}\n"
             f"**Response:** {context.response}\n"
         )

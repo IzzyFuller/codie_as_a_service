@@ -608,7 +608,7 @@ class TestApp:
     _PHASE_DEFAULTS = {
         "hydrate": LLMResponseSpec(
             stop_reason="end_turn",
-            content='{"summary": "Test identity", "key_patterns": [], "session_state": "Testing"}',
+            content="Test identity summary for orchestrator testing.",
         ),
         "extend": LLMResponseSpec(
             stop_reason="end_turn",

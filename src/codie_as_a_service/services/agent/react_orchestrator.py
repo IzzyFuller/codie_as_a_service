@@ -63,6 +63,41 @@ class LLMPhaseDefinition:
         ).to_session_context(context)
 
 
+class TextLLMPhaseDefinition:
+    """Phase backed by an LLM call that returns plain text.
+
+    No structured output schema — the LLM returns free-form text which
+    is written directly to a named field on the session context.
+    Saves the extra formatting turn that schema validation requires.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        llm: LLMProtocol,
+        system_prompt: str,
+        context_field: str,
+        skip_on_retry: bool = False,
+    ) -> None:
+        self.name = name
+        self._llm = llm
+        self._system_prompt = system_prompt
+        self._context_field = context_field
+        self._skip_on_retry = skip_on_retry
+
+    def execute(self, context: SessionContext) -> None:
+        """Call LLM, write raw text to context field."""
+        if self._skip_on_retry and context.iteration > 0:
+            logger.info("Phase %s skipped (iteration %d)", self.name, context.iteration)
+            return
+        logger.info("Phase %s starting (iteration %d)", self.name, context.iteration)
+        response = self._llm.call(
+            messages=[Message(role="user", content=context.model_dump_json())],
+            system_prompt=self._system_prompt,
+        )
+        setattr(context, self._context_field, response.content[0].text)
+
+
 class SynthesizePhaseDefinition:
     """Deterministic phase that persists the current interaction to memory.
 

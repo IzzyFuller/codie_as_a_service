@@ -48,18 +48,6 @@ class PhaseOutputModel(BaseModel):
 # =============================================================================
 
 
-class HydratedIdentity(PhaseOutputModel):
-    """Output of HYDRATE phase: condensed identity context."""
-
-    summary: str
-    key_patterns: list[str]
-    session_state: str
-
-    def to_session_context(self, context: SessionContext) -> SessionContext:
-        context.identity_summary = self.summary
-        return context
-
-
 class ExtendedInstruction(PhaseOutputModel):
     """Output of EXTEND phase: enriched instruction with tool selection."""
 

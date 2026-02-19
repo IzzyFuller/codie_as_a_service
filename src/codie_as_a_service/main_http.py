@@ -26,7 +26,6 @@ from codie_as_a_service.core.protocols import (
 from codie_as_a_service.core.models import ToolDefinition
 from codie_as_a_service.core.phase_models import (
     ExtendedInstruction,
-    HydratedIdentity,
     ProcessResult,
     ValidationResult,
 )
@@ -34,6 +33,7 @@ from codie_as_a_service.services.agent.react_orchestrator import (
     LLMPhaseDefinition,
     ReActOrchestrator,
     SynthesizePhaseDefinition,
+    TextLLMPhaseDefinition,
 )
 from codie_as_a_service.services.memory.memory_service import MemoryService
 
@@ -279,11 +279,11 @@ def _build_orchestrator_phases(
 ) -> list[Phase]:
     """Build the standard orchestrator phase definitions."""
     return [
-        LLMPhaseDefinition(
+        TextLLMPhaseDefinition(
             name="hydrate",
             llm=llm,
             system_prompt=prompt_adapter.get_prompt("orchestrator_hydrate"),
-            output_schema=HydratedIdentity,
+            context_field="identity_summary",
             skip_on_retry=True,
         ),
         LLMPhaseDefinition(

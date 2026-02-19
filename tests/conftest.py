@@ -94,26 +94,23 @@ def rabbitmq_broker():
     started_container = False
 
     if not _port_is_reachable("localhost", RABBITMQ_PORT):
-        try:
-            subprocess.run(["docker", "rm", "-f", "rabbitmq-test"], capture_output=True)
-            subprocess.run(
-                [
-                    "docker",
-                    "run",
-                    "-d",
-                    "--name",
-                    "rabbitmq-test",
-                    "-p",
-                    f"{RABBITMQ_PORT}:5672",
-                    "rabbitmq:3-management",
-                ],
-                check=True,
-                capture_output=True,
-            )
-            time.sleep(10)
-            started_container = True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pytest.skip(f"RabbitMQ not available on port {RABBITMQ_PORT}")
+        subprocess.run(["docker", "rm", "-f", "rabbitmq-test"], capture_output=True)
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "-d",
+                "--name",
+                "rabbitmq-test",
+                "-p",
+                f"{RABBITMQ_PORT}:5672",
+                "rabbitmq:3-management",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        time.sleep(10)
+        started_container = True
 
     yield
 
@@ -128,33 +125,28 @@ def firestore_emulator():
     started_container = False
 
     if not _port_is_reachable("localhost", FIRESTORE_EMULATOR_PORT):
-        try:
-            subprocess.run(
-                ["docker", "rm", "-f", "firestore-emulator-test"], capture_output=True
-            )
-            subprocess.run(
-                [
-                    "docker",
-                    "run",
-                    "-d",
-                    "--name",
-                    "firestore-emulator-test",
-                    "-p",
-                    f"{FIRESTORE_EMULATOR_PORT}:8080",
-                    "google/cloud-sdk:emulators",
-                    "/bin/bash",
-                    "-c",
-                    f"gcloud beta emulators firestore start --project={PROJECT_ID} --host-port=0.0.0.0:8080",
-                ],
-                check=True,
-                capture_output=True,
-            )
-            time.sleep(5)
-            started_container = True
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            pytest.skip(
-                f"Firestore emulator not available on port {FIRESTORE_EMULATOR_PORT}"
-            )
+        subprocess.run(
+            ["docker", "rm", "-f", "firestore-emulator-test"], capture_output=True
+        )
+        subprocess.run(
+            [
+                "docker",
+                "run",
+                "-d",
+                "--name",
+                "firestore-emulator-test",
+                "-p",
+                f"{FIRESTORE_EMULATOR_PORT}:8080",
+                "google/cloud-sdk:emulators",
+                "/bin/bash",
+                "-c",
+                f"gcloud beta emulators firestore start --project={PROJECT_ID} --host-port=0.0.0.0:8080",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        time.sleep(5)
+        started_container = True
 
     os.environ["FIRESTORE_EMULATOR_HOST"] = f"localhost:{FIRESTORE_EMULATOR_PORT}"
 

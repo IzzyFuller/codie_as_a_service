@@ -71,7 +71,7 @@ class ClaudeCliAdapter:
 
         # Single call — Claude Code handles tools natively
         result = self._run_claude(
-            prompt, system_prompt, json_schema=json_schema, tools=tools
+            prompt, system_prompt, json_schema=json_schema, tools=tools or []
         )
         logger.info("Claude CLI returned %d chars", len(result))
         logger.debug("Result: %.500s", result)
@@ -95,7 +95,7 @@ class ClaudeCliAdapter:
         prompt: str,
         system_prompt: str,
         json_schema: dict[str, Any] | None = None,
-        tools: list[ToolDefinition] | None = None,
+        tools: list[ToolDefinition] = (),
     ) -> str:
         """
         Run Claude CLI and return result text.
@@ -106,7 +106,7 @@ class ClaudeCliAdapter:
             prompt: The user prompt
             system_prompt: System prompt to use
             json_schema: Optional JSON schema to force structured output
-            tools: Optional tool definitions (passed via --allowedTools)
+            tools: Tool definitions — always passed via --allowedTools
 
         Returns:
             The result text from Claude's response
@@ -123,10 +123,7 @@ class ClaudeCliAdapter:
         if json_schema is not None:
             cmd.extend(["--json-schema", json.dumps(json_schema)])
 
-        # Pass tool names via --allowedTools so Claude Code can use them
-        if tools:
-            tool_names = ",".join(t.name for t in tools)
-            cmd.extend(["--allowedTools", tool_names])
+        cmd.extend(["--allowedTools", ",".join(t.name for t in tools)])
 
         result = subprocess.run(
             cmd,

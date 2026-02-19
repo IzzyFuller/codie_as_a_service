@@ -103,7 +103,7 @@ class ReActOrchestrator:
         response = self._llm.call(
             messages=messages,
             system_prompt=phase.system_prompt,
-            tools=phase.tools if phase.tools else None,
+            tools=phase.tools,
             output_format=output_format,
             max_new_tokens=phase.max_new_tokens,
         )

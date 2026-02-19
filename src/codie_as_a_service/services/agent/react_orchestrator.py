@@ -5,7 +5,11 @@ import logging
 from pydantic import BaseModel
 
 from codie_as_a_service.core.models import ContentBlock, Message
-from codie_as_a_service.core.phase_models import PhaseDefinition, SessionContext
+from codie_as_a_service.core.phase_models import (
+    PhaseDefinition,
+    PhaseOutputModel,
+    SessionContext,
+)
 from codie_as_a_service.core.protocols import LLMProtocol
 from codie_as_a_service.services.memory.memory_service import MemoryService
 
@@ -115,17 +119,11 @@ class ReActOrchestrator:
 
         text_result = " ".join(text_parts)
         result = self._parse_phase_output(text_result, phase.output_schema)
-
-        if phase.sets_identity_from:
-            context.identity_summary = getattr(result, phase.sets_identity_from)
-        if phase.sets_response_from:
-            context.response = getattr(result, phase.sets_response_from)
-        if phase.sets_done_from:
-            context.done = getattr(result, phase.sets_done_from)
+        result.to_session_context(context)
 
     def _parse_phase_output(
-        self, text: str, output_schema: type[BaseModel]
-    ) -> BaseModel:
+        self, text: str, output_schema: type[PhaseOutputModel]
+    ) -> PhaseOutputModel:
         """Parse phase output text into the expected schema model."""
         text = text.strip()
         data = json.loads(text)

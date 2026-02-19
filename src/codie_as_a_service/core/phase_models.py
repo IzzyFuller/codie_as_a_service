@@ -1,54 +1,10 @@
 """Phase output models and orchestration config for the ReActOrchestrator."""
 
+from __future__ import annotations
+
 from pydantic import BaseModel
 
 from codie_as_a_service.core.models import ToolDefinition
-
-
-# =============================================================================
-# Phase Output Models
-# =============================================================================
-
-
-class HydratedIdentity(BaseModel):
-    """Output of HYDRATE phase: condensed identity context."""
-
-    summary: str
-    key_patterns: list[str]
-    session_state: str
-
-
-class ExtendedInstruction(BaseModel):
-    """Output of EXTEND phase: enriched instruction with tool selection."""
-
-    instruction: str
-    tool_manifest: list[str]
-    rationale: str
-    memory_references: list[str]
-
-
-class ProcessResult(BaseModel):
-    """Output of PROCESS phase: main reasoning result."""
-
-    output: str
-    tools_used: list[str]
-    trace: str
-
-
-class ValidationResult(BaseModel):
-    """Output of VALIDATE phase: completion check."""
-
-    done: bool
-    justification: str
-    feedback: str
-
-
-class SynthesisResult(BaseModel):
-    """Output of SYNTHESIZE phase: memory writes + user-facing response."""
-
-    response: str
-    writes: list[str]
-    summary: str
 
 
 # =============================================================================
@@ -70,6 +26,95 @@ class SessionContext(BaseModel):
 
 
 # =============================================================================
+# Phase Output Base
+# =============================================================================
+
+
+class PhaseOutputModel(BaseModel):
+    """Base for all phase output models.
+
+    Each phase output knows how to apply itself to the SessionContext.
+    The orchestrator calls to_session_context() — it never needs to know
+    which fields a phase updates.
+    """
+
+    def to_session_context(self, context: SessionContext) -> SessionContext:
+        """Apply this phase's output to the session context.
+
+        Subclasses must override to update the fields they own.
+        """
+        raise NotImplementedError
+
+
+# =============================================================================
+# Phase Output Models
+# =============================================================================
+
+
+class HydratedIdentity(PhaseOutputModel):
+    """Output of HYDRATE phase: condensed identity context."""
+
+    summary: str
+    key_patterns: list[str]
+    session_state: str
+
+    def to_session_context(self, context: SessionContext) -> SessionContext:
+        context.identity_summary = self.summary
+        return context
+
+
+class ExtendedInstruction(PhaseOutputModel):
+    """Output of EXTEND phase: enriched instruction with tool selection."""
+
+    instruction: str
+    tool_manifest: list[str]
+    rationale: str
+    memory_references: list[str]
+
+    def to_session_context(self, context: SessionContext) -> SessionContext:
+        context.instruction = self.instruction
+        return context
+
+
+class ProcessResult(PhaseOutputModel):
+    """Output of PROCESS phase: main reasoning result."""
+
+    output: str
+    tools_used: list[str]
+    trace: str
+
+    def to_session_context(self, context: SessionContext) -> SessionContext:
+        context.response = self.output
+        return context
+
+
+class SynthesisResult(PhaseOutputModel):
+    """Output of SYNTHESIZE phase: memory persistence.
+
+    Memory writes happen as tool side-effects during the phase.
+    This model records what was written but does not modify the context.
+    """
+
+    writes: list[str]
+    summary: str
+
+    def to_session_context(self, context: SessionContext) -> SessionContext:
+        return context
+
+
+class ValidationResult(PhaseOutputModel):
+    """Output of VALIDATE phase: completion check."""
+
+    done: bool
+    justification: str
+    feedback: str
+
+    def to_session_context(self, context: SessionContext) -> SessionContext:
+        context.done = self.done
+        return context
+
+
+# =============================================================================
 # Orchestration Config
 # =============================================================================
 
@@ -80,8 +125,5 @@ class PhaseDefinition(BaseModel):
     name: str
     system_prompt: str
     tools: list[ToolDefinition] = []
-    output_schema: type[BaseModel]
+    output_schema: type[PhaseOutputModel]
     max_new_tokens: int | None = None
-    sets_response_from: str | None = None
-    sets_done_from: str | None = None
-    sets_identity_from: str | None = None

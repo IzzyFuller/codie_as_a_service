@@ -735,9 +735,7 @@ class TestApp:
         )
         synthesize_schema = LLMResponseSpec(
             stop_reason="end_turn",
-            content=json.dumps(
-                {"response": last_content, "writes": [], "summary": "Persisted state"}
-            ),
+            content=json.dumps({"writes": [], "summary": "Persisted state"}),
         )
 
         full_sequence: list[LLMResponseSpec] = []

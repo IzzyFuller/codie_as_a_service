@@ -277,7 +277,6 @@ def _build_orchestrator_phases(
             system_prompt=prompt_adapter.get_prompt("orchestrator_hydrate"),
             tools=[],
             output_schema=HydratedIdentity,
-            sets_identity_from="summary",
         ),
         PhaseDefinition(
             name="extend",
@@ -296,14 +295,12 @@ def _build_orchestrator_phases(
             system_prompt=prompt_adapter.get_prompt("orchestrator_synthesize"),
             tools=tools,
             output_schema=SynthesisResult,
-            sets_response_from="response",
         ),
         PhaseDefinition(
             name="validate",
             system_prompt=prompt_adapter.get_prompt("orchestrator_validate"),
             tools=[],
             output_schema=ValidationResult,
-            sets_done_from="done",
         ),
     ]
 

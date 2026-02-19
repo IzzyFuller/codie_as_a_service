@@ -318,9 +318,10 @@ def agent_app(
     Uses dedicated pubsub_memory_service (not parameterized).
     """
     tools = _get_memory_tool_definitions()
-    phases = _build_orchestrator_phases(file_prompt_adapter, tools)
+    phases = _build_orchestrator_phases(
+        file_prompt_adapter, tools, pubsub_llm_adapter, pubsub_memory_service
+    )
     orchestrator = ReActOrchestrator(
-        llm=pubsub_llm_adapter,
         memory=pubsub_memory_service,
         phases=phases,
     )
@@ -451,10 +452,6 @@ def file_prompt_adapter():
         "orchestrator_validate.txt": (
             "You are a validation agent. Assess if the processing result addresses the instruction. "
             "Return JSON with done, justification, feedback."
-        ),
-        "orchestrator_synthesize.txt": (
-            "You are a synthesis agent. Persist important information to memory. "
-            "Return JSON with writes, summary."
         ),
     }
 
@@ -705,22 +702,19 @@ class TestApp:
         hydrate: list[LLMResponseSpec] | None = None,
         extend: list[LLMResponseSpec] | None = None,
         process: list[LLMResponseSpec] | None = None,
-        synthesize: list[LLMResponseSpec] | None = None,
         validate: list[LLMResponseSpec] | None = None,
         iterations: int = 1,
     ) -> None:
         """
         Configure LLM mock with per-phase response sequences.
 
-        In the new architecture, each phase is exactly 1 adapter.call().
-        The adapter handles tool execution internally — the orchestrator
-        just sees 1 call per phase returning the schema-constrained result.
+        SYNTHESIZE is now deterministic (no LLM call), so 4 LLM calls
+        per iteration: HYDRATE, EXTEND, PROCESS, VALIDATE.
 
         Args:
             hydrate: Custom HYDRATE phase response (1 schema call)
             extend: Custom EXTEND phase response (1 schema call)
             process: Custom PROCESS phase response (1 schema call; adapter handles tools)
-            synthesize: Custom SYNTHESIZE phase response (1 schema call; adapter handles tools)
             validate: Custom VALIDATE phase response (1 schema call)
             iterations: Number of orchestrator iterations (last validates pass)
         """
@@ -732,10 +726,6 @@ class TestApp:
         process_schema = LLMResponseSpec(
             stop_reason="end_turn",
             content=json.dumps({"output": last_content, "tools_used": [], "trace": ""}),
-        )
-        synthesize_schema = LLMResponseSpec(
-            stop_reason="end_turn",
-            content=json.dumps({"writes": [], "summary": "Persisted state"}),
         )
 
         full_sequence: list[LLMResponseSpec] = []
@@ -759,8 +749,7 @@ class TestApp:
             # PROCESS — 1 call (adapter handles tools internally)
             full_sequence.extend(self._build_phase(process_schema))
 
-            # SYNTHESIZE — 1 call (adapter handles tools internally)
-            full_sequence.extend(self._build_phase(synthesize_schema))
+            # SYNTHESIZE — deterministic, no LLM call
 
             # VALIDATE — 1 call
             if validate:

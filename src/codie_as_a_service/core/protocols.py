@@ -1,12 +1,17 @@
 """Abstract protocols (interfaces) for dependency injection."""
 
-from typing import Any, Protocol, runtime_checkable
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from codie_as_a_service.core.models import (
     LLMResponse,
     Message,
     ToolDefinition,
 )
+
+if TYPE_CHECKING:
+    from codie_as_a_service.core.phase_models import SessionContext
 
 
 @runtime_checkable
@@ -110,4 +115,20 @@ class AuthProtocol(Protocol):
         Returns:
             True if valid, False otherwise
         """
+        ...
+
+
+@runtime_checkable
+class Phase(Protocol):
+    """Abstract interface for an orchestration phase.
+
+    Any class with an execute(context) method satisfies this protocol.
+    LLM phases call an adapter; deterministic phases (e.g. SYNTHESIZE)
+    do their work directly.
+    """
+
+    name: str
+
+    def execute(self, context: SessionContext) -> None:
+        """Execute this phase, mutating the session context in place."""
         ...

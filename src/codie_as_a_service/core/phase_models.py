@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
-from codie_as_a_service.core.models import ToolDefinition
-
-
 # =============================================================================
 # Session Context (generic pipeline state)
 # =============================================================================
@@ -88,20 +85,6 @@ class ProcessResult(PhaseOutputModel):
         return context
 
 
-class SynthesisResult(PhaseOutputModel):
-    """Output of SYNTHESIZE phase: memory persistence.
-
-    Memory writes happen as tool side-effects during the phase.
-    This model records what was written but does not modify the context.
-    """
-
-    writes: list[str]
-    summary: str
-
-    def to_session_context(self, context: SessionContext) -> SessionContext:
-        return context
-
-
 class ValidationResult(PhaseOutputModel):
     """Output of VALIDATE phase: completion check."""
 
@@ -112,18 +95,3 @@ class ValidationResult(PhaseOutputModel):
     def to_session_context(self, context: SessionContext) -> SessionContext:
         context.done = self.done
         return context
-
-
-# =============================================================================
-# Orchestration Config
-# =============================================================================
-
-
-class PhaseDefinition(BaseModel):
-    """Configuration for a single orchestration phase."""
-
-    name: str
-    system_prompt: str
-    tools: list[ToolDefinition] = []
-    output_schema: type[PhaseOutputModel]
-    max_new_tokens: int | None = None

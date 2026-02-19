@@ -4,32 +4,111 @@ import logging
 
 from pydantic import BaseModel
 
-from codie_as_a_service.core.models import Message
-from codie_as_a_service.core.phase_models import PhaseDefinition, SessionContext
-from codie_as_a_service.core.protocols import LLMProtocol
+from codie_as_a_service.core.models import Message, ToolDefinition
+from codie_as_a_service.core.phase_models import PhaseOutputModel, SessionContext
+from codie_as_a_service.core.protocols import LLMProtocol, Phase
 from codie_as_a_service.services.memory.memory_service import MemoryService
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Phase Definitions (plain classes — no Pydantic)
+# =============================================================================
+
+
+class LLMPhaseDefinition:
+    """Phase backed by an LLM call.
+
+    Owns its LLM adapter, system prompt, tools, and output schema.
+    execute() calls the LLM, validates the response against the schema,
+    and applies the result to the session context.
+    """
+
+    def __init__(
+        self,
+        name: str,
+        llm: LLMProtocol,
+        system_prompt: str,
+        output_schema: type[PhaseOutputModel],
+        tools: list[ToolDefinition] | None = None,
+        max_new_tokens: int | None = None,
+    ) -> None:
+        self.name = name
+        self._llm = llm
+        self._system_prompt = system_prompt
+        self._output_schema = output_schema
+        self._tools = tools or []
+        self._max_new_tokens = max_new_tokens
+
+    def execute(self, context: SessionContext) -> None:
+        """Call LLM, validate response, apply to context."""
+        logger.info("Phase %s starting (iteration %d)", self.name, context.iteration)
+        self._output_schema.model_validate(
+            self._llm.call(
+                messages=[Message(role="user", content=context.model_dump_json())],
+                system_prompt=self._system_prompt,
+                tools=self._tools,
+                output_format={
+                    "type": "json_schema",
+                    "schema": self._output_schema.model_json_schema(),
+                },
+                max_new_tokens=self._max_new_tokens,
+            ).data
+        ).to_session_context(context)
+
+
+class SynthesizePhaseDefinition:
+    """Deterministic phase that persists the current interaction to memory.
+
+    No LLM call — reads current_session, appends the interaction entry,
+    writes it back.
+    """
+
+    def __init__(self, name: str, memory: MemoryService) -> None:
+        self.name = name
+        self._memory = memory
+
+    def execute(self, context: SessionContext) -> None:
+        """Append current interaction to session memory."""
+        logger.info("Phase %s starting (iteration %d)", self.name, context.iteration)
+        current = (
+            self._memory.read_memory(agent_id=context.agent_id, key="current_session")
+            or ""
+        )
+        entry = (
+            f"\n\n## Interaction (iteration {context.iteration})\n"
+            f"**Instruction:** {context.instruction}\n"
+            f"**Response:** {context.response}\n"
+        )
+        self._memory.write_memory(
+            agent_id=context.agent_id,
+            key="current_session",
+            content=current + entry,
+        )
+
+
+# =============================================================================
+# Orchestrator
+# =============================================================================
 
 
 class ReActOrchestrator:
     """
     Multi-phase orchestration loop.
 
-    Runs phases in sequence per iteration, checks validation for completion,
-    loops back when not done. Each phase is a single adapter.call() —
-    the adapter handles tool execution internally.
+    Runs phases in sequence per iteration, checks for completion,
+    loops back when not done. Each phase owns its own execution —
+    the orchestrator just calls execute().
     """
 
     def __init__(
         self,
-        llm: LLMProtocol,
         memory: MemoryService,
-        phases: list[PhaseDefinition],
+        phases: list[Phase],
         max_outer_iterations: int = 3,
         session_lines: int | None = 50,
     ) -> None:
-        self._llm = llm
         self._memory = memory
         self._phases = phases
         self._max_outer_iterations = max_outer_iterations
@@ -72,7 +151,7 @@ class ReActOrchestrator:
             context.iteration = iteration
 
             for phase in self._phases:
-                self._execute_phase(phase, context)
+                phase.execute(context)
 
                 if context.done:
                     return output_format.model_validate(context.model_dump())
@@ -84,19 +163,3 @@ class ReActOrchestrator:
                 context.response = ""
 
         return output_format.model_validate(context.model_dump())
-
-    def _execute_phase(self, phase: PhaseDefinition, context: SessionContext) -> None:
-        """Execute a single phase: call LLM, apply result to context."""
-        logger.info("Phase %s starting (iteration %d)", phase.name, context.iteration)
-        phase.output_schema.model_validate(
-            self._llm.call(
-                messages=[Message(role="user", content=context.model_dump_json())],
-                system_prompt=phase.system_prompt,
-                tools=phase.tools,
-                output_format={
-                    "type": "json_schema",
-                    "schema": phase.output_schema.model_json_schema(),
-                },
-                max_new_tokens=phase.max_new_tokens,
-            ).data
-        ).to_session_context(context)

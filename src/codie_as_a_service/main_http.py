@@ -20,18 +20,21 @@ from codie_as_a_service.core.protocols import (
     AuthProtocol,
     LLMProtocol,
     MemoryProtocol,
+    Phase,
     PromptProtocol,
 )
 from codie_as_a_service.core.models import ToolDefinition
 from codie_as_a_service.core.phase_models import (
     ExtendedInstruction,
     HydratedIdentity,
-    PhaseDefinition,
     ProcessResult,
-    SynthesisResult,
     ValidationResult,
 )
-from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
+from codie_as_a_service.services.agent.react_orchestrator import (
+    LLMPhaseDefinition,
+    ReActOrchestrator,
+    SynthesizePhaseDefinition,
+)
 from codie_as_a_service.services.memory.memory_service import MemoryService
 
 load_dotenv()
@@ -78,10 +81,11 @@ def create_app(
     if tools is None:
         tools = _get_memory_tool_definitions()
 
-    # Build orchestrator — adapter handles tools internally
-    phases = _build_orchestrator_phases(prompt_adapter, tools)
+    # Build orchestrator — each phase owns its execution
+    phases = _build_orchestrator_phases(
+        prompt_adapter, tools, llm_adapter, memory_service
+    )
     orchestrator = ReActOrchestrator(
-        llm=llm_adapter,
         memory=memory_service,
         phases=phases,
     )
@@ -268,38 +272,40 @@ def _get_mcp_tool_definitions() -> list[ToolDefinition]:
 
 
 def _build_orchestrator_phases(
-    prompt_adapter: PromptProtocol, tools: list[ToolDefinition]
-) -> list[PhaseDefinition]:
+    prompt_adapter: PromptProtocol,
+    tools: list[ToolDefinition],
+    llm: LLMProtocol,
+    memory: MemoryService,
+) -> list[Phase]:
     """Build the standard orchestrator phase definitions."""
     return [
-        PhaseDefinition(
+        LLMPhaseDefinition(
             name="hydrate",
+            llm=llm,
             system_prompt=prompt_adapter.get_prompt("orchestrator_hydrate"),
-            tools=[],
             output_schema=HydratedIdentity,
         ),
-        PhaseDefinition(
+        LLMPhaseDefinition(
             name="extend",
+            llm=llm,
             system_prompt=prompt_adapter.get_prompt("orchestrator_extend"),
-            tools=[],
             output_schema=ExtendedInstruction,
         ),
-        PhaseDefinition(
+        LLMPhaseDefinition(
             name="process",
+            llm=llm,
             system_prompt=prompt_adapter.get_prompt("orchestrator_process"),
             tools=tools,
             output_schema=ProcessResult,
         ),
-        PhaseDefinition(
+        SynthesizePhaseDefinition(
             name="synthesize",
-            system_prompt=prompt_adapter.get_prompt("orchestrator_synthesize"),
-            tools=tools,
-            output_schema=SynthesisResult,
+            memory=memory,
         ),
-        PhaseDefinition(
+        LLMPhaseDefinition(
             name="validate",
+            llm=llm,
             system_prompt=prompt_adapter.get_prompt("orchestrator_validate"),
-            tools=[],
             output_schema=ValidationResult,
         ),
     ]

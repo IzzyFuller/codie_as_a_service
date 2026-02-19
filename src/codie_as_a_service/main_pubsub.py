@@ -164,9 +164,10 @@ def main() -> None:
     )
 
     tools = _get_memory_tool_definitions()
-    phases = _build_orchestrator_phases(prompt_adapter, tools)
+    phases = _build_orchestrator_phases(
+        prompt_adapter, tools, llm_adapter, memory_service
+    )
     orchestrator = ReActOrchestrator(
-        llm=llm_adapter,
         memory=memory_service,
         phases=phases,
     )

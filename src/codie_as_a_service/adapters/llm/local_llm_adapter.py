@@ -6,6 +6,7 @@ SmolLM3's native tool calling via xml_tools parameter is preserved.
 Tool execution happens internally — the adapter returns the final result.
 """
 
+import json
 import logging
 from typing import Any
 
@@ -97,9 +98,11 @@ class LocalLLMAdapter:
         text = self._generate(prompt, effective_max_tokens, json_schema=json_schema)
 
         # Return final result as text content (tools already resolved)
+        data = json.loads(text) if output_format else None
         return LLMResponse(
             stop_reason="end_turn",
             content=[ContentBlock(text=text)],
+            data=data,
         )
 
     def _generate(  # pragma: no cover

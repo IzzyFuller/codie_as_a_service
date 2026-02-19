@@ -77,9 +77,11 @@ class ClaudeCliAdapter:
         logger.debug("Result: %.500s", result)
 
         # No tool call parsing needed — Claude Code resolved them internally
+        data = json.loads(result) if output_format else None
         return LLMResponse(
             stop_reason="end_turn",
             content=[ContentBlock(text=result)],
+            data=data,
         )
 
     def _build_prompt(self, messages: list[Message]) -> str:

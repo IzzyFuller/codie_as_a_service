@@ -1,15 +1,11 @@
 """ReActOrchestrator - Multi-phase orchestration loop."""
 
-import json
 import logging
+
 from pydantic import BaseModel
 
-from codie_as_a_service.core.models import ContentBlock, Message
-from codie_as_a_service.core.phase_models import (
-    PhaseDefinition,
-    PhaseOutputModel,
-    SessionContext,
-)
+from codie_as_a_service.core.models import Message
+from codie_as_a_service.core.phase_models import PhaseDefinition, SessionContext
 from codie_as_a_service.core.protocols import LLMProtocol
 from codie_as_a_service.services.memory.memory_service import MemoryService
 
@@ -90,41 +86,17 @@ class ReActOrchestrator:
         return output_format.model_validate(context.model_dump())
 
     def _execute_phase(self, phase: PhaseDefinition, context: SessionContext) -> None:
-        """Execute a single phase with one adapter.call().
-
-        The adapter handles tool execution internally. The orchestrator
-        just passes tools + output_format and gets back the final result.
-        """
+        """Execute a single phase: call LLM, apply result to context."""
         logger.info("Phase %s starting (iteration %d)", phase.name, context.iteration)
-        phase_input = context.model_dump_json()
-        messages = [Message(role="user", content=phase_input)]
-
-        # Single call per phase — adapter handles tools internally
-        output_format = {
-            "type": "json_schema",
-            "schema": phase.output_schema.model_json_schema(),
-        }
-        response = self._llm.call(
-            messages=messages,
-            system_prompt=phase.system_prompt,
-            tools=phase.tools,
-            output_format=output_format,
-            max_new_tokens=phase.max_new_tokens,
-        )
-
-        text_parts = []
-        for block in response.content:
-            if isinstance(block, ContentBlock):
-                text_parts.append(block.text)
-
-        text_result = " ".join(text_parts)
-        result = self._parse_phase_output(text_result, phase.output_schema)
-        result.to_session_context(context)
-
-    def _parse_phase_output(
-        self, text: str, output_schema: type[PhaseOutputModel]
-    ) -> PhaseOutputModel:
-        """Parse phase output text into the expected schema model."""
-        text = text.strip()
-        data = json.loads(text)
-        return output_schema(**data)
+        phase.output_schema.model_validate(
+            self._llm.call(
+                messages=[Message(role="user", content=context.model_dump_json())],
+                system_prompt=phase.system_prompt,
+                tools=phase.tools,
+                output_format={
+                    "type": "json_schema",
+                    "schema": phase.output_schema.model_json_schema(),
+                },
+                max_new_tokens=phase.max_new_tokens,
+            ).data
+        ).to_session_context(context)

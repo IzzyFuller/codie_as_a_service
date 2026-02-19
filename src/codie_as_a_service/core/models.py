@@ -83,6 +83,9 @@ class LLMResponse(BaseModel):
     content: list[Union[ContentBlock, ToolUseBlock]] = Field(
         default_factory=list, description="Content blocks in the response"
     )
+    data: dict[str, Any] | None = Field(
+        default=None, description="Parsed structured output when output_format was used"
+    )
 
 
 # =============================================================================

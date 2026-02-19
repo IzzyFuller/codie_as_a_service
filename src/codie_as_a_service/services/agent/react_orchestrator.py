@@ -33,6 +33,7 @@ class LLMPhaseDefinition:
         output_schema: type[PhaseOutputModel],
         tools: list[ToolDefinition] | None = None,
         max_new_tokens: int | None = None,
+        skip_on_retry: bool = False,
     ) -> None:
         self.name = name
         self._llm = llm
@@ -40,9 +41,13 @@ class LLMPhaseDefinition:
         self._output_schema = output_schema
         self._tools = tools or []
         self._max_new_tokens = max_new_tokens
+        self._skip_on_retry = skip_on_retry
 
     def execute(self, context: SessionContext) -> None:
         """Call LLM, validate response, apply to context."""
+        if self._skip_on_retry and context.iteration > 0:
+            logger.info("Phase %s skipped (iteration %d)", self.name, context.iteration)
+            return
         logger.info("Phase %s starting (iteration %d)", self.name, context.iteration)
         self._output_schema.model_validate(
             self._llm.call(

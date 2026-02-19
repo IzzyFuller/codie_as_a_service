@@ -708,8 +708,11 @@ class TestApp:
         """
         Configure LLM mock with per-phase response sequences.
 
-        SYNTHESIZE is now deterministic (no LLM call), so 4 LLM calls
-        per iteration: HYDRATE, EXTEND, PROCESS, VALIDATE.
+        SYNTHESIZE is deterministic (no LLM call). HYDRATE and EXTEND
+        have skip_on_retry=True, so only run on iteration 0.
+
+        Iteration 0: HYDRATE + EXTEND + PROCESS + VALIDATE = 4 LLM calls
+        Iteration 1+: PROCESS + VALIDATE = 2 LLM calls
 
         Args:
             hydrate: Custom HYDRATE phase response (1 schema call)
@@ -732,19 +735,18 @@ class TestApp:
         for i in range(iterations):
             is_last = i == iterations - 1
 
-            # HYDRATE — 1 call
-            full_sequence.extend(
-                self._build_phase(
-                    hydrate[0] if hydrate else self._PHASE_DEFAULTS["hydrate"]
+            # HYDRATE + EXTEND — only on iteration 0 (skip_on_retry=True)
+            if i == 0:
+                full_sequence.extend(
+                    self._build_phase(
+                        hydrate[0] if hydrate else self._PHASE_DEFAULTS["hydrate"]
+                    )
                 )
-            )
-
-            # EXTEND — 1 call
-            full_sequence.extend(
-                self._build_phase(
-                    extend[0] if extend else self._PHASE_DEFAULTS["extend"]
+                full_sequence.extend(
+                    self._build_phase(
+                        extend[0] if extend else self._PHASE_DEFAULTS["extend"]
+                    )
                 )
-            )
 
             # PROCESS — 1 call (adapter handles tools internally)
             full_sequence.extend(self._build_phase(process_schema))

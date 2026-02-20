@@ -6,7 +6,6 @@ Not for production deployment - demo purposes only.
 
 import json
 import os
-import uuid
 
 import gradio as gr
 import httpx
@@ -37,9 +36,16 @@ def parse_sse_events(response: httpx.Response):
                 yield current_event, data
 
 
-def chat(message: str, history: list[dict], agent_id: str):
+def chat(message: str, history: list[dict], agent_id: str, session_state: dict):
     """Send message to agent and stream response."""
-    session_id = str(uuid.uuid4())
+    # First message: omit session_id so backend generates one.
+    # Subsequent messages: reuse the session_id from the first response.
+    payload: dict = {
+        "agent_id": agent_id or DEFAULT_AGENT_ID,
+        "message": message,
+    }
+    if session_state.get("session_id"):
+        payload["session_id"] = session_state["session_id"]
 
     with httpx.Client(timeout=float(LLM_TIMEOUT)) as client:
         headers = {"X-API-Key": API_KEY} if API_KEY else {}
@@ -47,17 +53,16 @@ def chat(message: str, history: list[dict], agent_id: str):
             "POST",
             f"{API_BASE_URL}/chat",
             headers=headers,
-            json={
-                "agent_id": agent_id or DEFAULT_AGENT_ID,
-                "session_id": session_id,
-                "message": message,
-            },
+            json=payload,
         ) as response:
             response.raise_for_status()
 
             full_response = ""
             for event_type, data in parse_sse_events(response):
                 if event_type == "response":
+                    # Capture session_id from backend for reuse
+                    if "session_id" in data:
+                        session_state["session_id"] = data["session_id"]
                     full_response = data.get("output", "")
                     yield full_response
                 elif event_type == "error":
@@ -71,6 +76,8 @@ def create_demo() -> gr.Blocks:
         gr.Markdown("# Deep Agent Service Demo")
         gr.Markdown("Chat with the deep agent. Responses stream in real-time.")
 
+        session_state = gr.State(value={})
+
         agent_id_input = gr.Textbox(
             label="Agent ID",
             value=DEFAULT_AGENT_ID,
@@ -79,7 +86,7 @@ def create_demo() -> gr.Blocks:
 
         gr.ChatInterface(
             fn=chat,
-            additional_inputs=[agent_id_input],
+            additional_inputs=[agent_id_input, session_state],
             title=None,
             examples=[
                 ["Hello, who are you?"],

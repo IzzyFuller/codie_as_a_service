@@ -318,12 +318,13 @@ def agent_app(
     Uses dedicated pubsub_memory_service (not parameterized).
     """
     tools = _get_memory_tool_definitions()
-    phases = _build_orchestrator_phases(
+    phases, post_phases = _build_orchestrator_phases(
         file_prompt_adapter, tools, pubsub_llm_adapter, pubsub_memory_service
     )
     orchestrator = ReActOrchestrator(
         memory=pubsub_memory_service,
         phases=phases,
+        post_phases=post_phases,
     )
 
     # Adapters implement synapse protocols
@@ -756,9 +757,8 @@ class TestApp:
             # PROCESS — 1 call (adapter handles tools internally)
             full_sequence.extend(self._build_phase(process_schema))
 
-            # SYNTHESIZE — deterministic, no LLM call
-
             # VALIDATE — 1 call
+            # (SYNTHESIZE runs as post-phase after loop — no LLM call)
             if validate:
                 full_sequence.extend(self._build_phase(validate[0]))
             elif is_last:

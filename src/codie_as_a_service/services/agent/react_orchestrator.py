@@ -24,11 +24,13 @@ class ReActOrchestrator:
         self,
         memory: MemoryService,
         phases: list[Phase],
+        post_phases: list[Phase] | None = None,
         max_outer_iterations: int = 3,
         session_lines: int | None = None,
     ) -> None:
         self._memory = memory
         self._phases = phases
+        self._post_phases = post_phases or []
         self._max_outer_iterations = max_outer_iterations
         self._session_lines = session_lines
 
@@ -75,6 +77,8 @@ class ReActOrchestrator:
                 phase.execute(context)
 
                 if context.done:
+                    for post_phase in self._post_phases:
+                        post_phase.execute(context)
                     return output_format.model_validate(context.model_dump())
 
             # Archive response and reset for next iteration
@@ -83,4 +87,6 @@ class ReActOrchestrator:
                 context.done = False
                 context.response = ""
 
+        for post_phase in self._post_phases:
+            post_phase.execute(context)
         return output_format.model_validate(context.model_dump())

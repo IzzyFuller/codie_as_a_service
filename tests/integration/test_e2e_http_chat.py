@@ -10,6 +10,8 @@ Tests use TestApp which encapsulates all implementation details.
 If we change LLM adapters, only TestApp needs to change - not these tests.
 """
 
+import json
+
 import pytest
 
 from tests.conftest import LLMResponseSpec
@@ -327,6 +329,45 @@ class TestE2EHTTPChat:
         assert len(done_events) == 1
         assert response_events[0]["data"]["output"] == "Factory works!"
         assert response_events[0]["data"]["done"] is True
+
+        test_app.reset_llm()
+
+    def test_synthesize_persists_done_true_after_successful_chat(self, test_app):
+        """
+        Given: A user exists with identity in memory
+        When: Client POSTs to /chat and validation passes (done=true)
+        Then: Persisted current_session contains done=true in the JSON entry
+
+        SYNTHESIZE must run AFTER VALIDATE so the persisted snapshot
+        reflects the final pipeline state, not an intermediate one.
+        """
+        agent_id, session_id = test_app.setup_agent()
+
+        test_app.stub_phases(
+            process=[
+                LLMResponseSpec(stop_reason="end_turn", content="Persisted correctly!"),
+            ],
+        )
+
+        events = test_app.chat(agent_id, session_id, "Test persistence")
+
+        # Verify the request completed
+        done_events = [e for e in events if e["event"] == "done"]
+        assert len(done_events) == 1
+
+        # Read persisted current_session and verify done=true in the entry
+        persisted = test_app.read_memory(agent_id, "current_session")
+        assert persisted is not None, "SYNTHESIZE should have written current_session"
+
+        # Extract the JSON block from the persisted markdown entry
+        json_start = persisted.index("{")
+        json_end = persisted.rindex("}") + 1
+        entry = json.loads(persisted[json_start:json_end])
+
+        assert entry["done"] is True, (
+            f"Persisted entry should have done=true, got done={entry['done']}. "
+            "SYNTHESIZE likely ran before VALIDATE."
+        )
 
         test_app.reset_llm()
 

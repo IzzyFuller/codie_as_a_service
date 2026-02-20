@@ -84,12 +84,13 @@ def create_app(
         tools = _get_memory_tool_definitions()
 
     # Build orchestrator — each phase owns its execution
-    phases = _build_orchestrator_phases(
+    phases, post_phases = _build_orchestrator_phases(
         prompt_adapter, tools, llm_adapter, memory_service
     )
     orchestrator = ReActOrchestrator(
         memory=memory_service,
         phases=phases,
+        post_phases=post_phases,
     )
 
     def verify_api_key(x_api_key: str | None = Header(None)) -> None:
@@ -279,9 +280,14 @@ def _build_orchestrator_phases(
     tools: list[ToolDefinition],
     llm: LLMProtocol,
     memory: MemoryService,
-) -> list[Phase]:
-    """Build the standard orchestrator phase definitions."""
-    return [
+) -> tuple[list[Phase], list[Phase]]:
+    """Build the standard orchestrator phase and post-phase definitions.
+
+    Returns:
+        Tuple of (loop_phases, post_phases). Loop phases run each iteration;
+        post_phases run once after the loop completes (done=true or max iterations).
+    """
+    phases = [
         TextLLMPhaseDefinition(
             name="hydrate",
             llm=llm,
@@ -304,10 +310,6 @@ def _build_orchestrator_phases(
             tools=tools,
             output_schema=ProcessResult,
         ),
-        SynthesizePhaseDefinition(
-            name="synthesize",
-            memory=memory,
-        ),
         LLMPhaseDefinition(
             name="validate",
             llm=llm,
@@ -315,6 +317,13 @@ def _build_orchestrator_phases(
             output_schema=ValidationResult,
         ),
     ]
+    post_phases = [
+        SynthesizePhaseDefinition(
+            name="synthesize",
+            memory=memory,
+        ),
+    ]
+    return phases, post_phases
 
 
 def main() -> None:

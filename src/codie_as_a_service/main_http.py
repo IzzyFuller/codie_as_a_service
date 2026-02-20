@@ -26,6 +26,7 @@ from codie_as_a_service.core.protocols import (
 from codie_as_a_service.core.models import ToolDefinition
 from codie_as_a_service.core.phase_models import (
     ExtendedInstruction,
+    HydratedIdentity,
     ProcessResult,
     ValidationResult,
 )
@@ -283,7 +284,7 @@ def _build_orchestrator_phases(
             name="hydrate",
             llm=llm,
             system_prompt=prompt_adapter.get_prompt("orchestrator_hydrate"),
-            context_field="identity_summary",
+            output_schema=HydratedIdentity,
             skip_on_retry=True,
         ),
         LLMPhaseDefinition(

@@ -69,17 +69,17 @@ class TextLLMPhaseDefinition:
         name: str,
         llm: LLMProtocol,
         system_prompt: str,
-        context_field: str,
+        output_schema: type[PhaseOutputModel],
         skip_on_retry: bool = False,
     ) -> None:
         self.name = name
         self._llm = llm
         self._system_prompt = system_prompt
-        self._context_field = context_field
+        self._output_schema = output_schema
         self._skip_on_retry = skip_on_retry
 
     def execute(self, context: SessionContext) -> None:
-        """Call LLM, write raw text to context field."""
+        """Call LLM, wrap text in output schema, apply to context."""
         if self._skip_on_retry and context.iteration > 0:
             logger.info("Phase %s skipped (iteration %d)", self.name, context.iteration)
             return
@@ -88,7 +88,9 @@ class TextLLMPhaseDefinition:
             messages=[Message(role="user", content=context.model_dump_json())],
             system_prompt=self._system_prompt,
         )
-        setattr(context, self._context_field, response.content[0].text)
+        self._output_schema(text_output=response.content[0].text).to_session_context(
+            context
+        )
 
 
 class SynthesizePhaseDefinition:

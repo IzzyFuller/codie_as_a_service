@@ -76,16 +76,8 @@ class ReActOrchestrator:
             for phase in self._phases:
                 phase.execute(context)
 
-                if context.done:
-                    for post_phase in self._post_phases:
-                        post_phase.execute(context)
-                    return output_format.model_validate(context.model_dump())
-
-            # Archive response and reset for next iteration
-            if iteration < self._max_outer_iterations - 1:
-                context.conversation_history.append(context.response)
-                context.done = False
-                context.response = ""
+            if context.done:
+                break
 
         for post_phase in self._post_phases:
             post_phase.execute(context)

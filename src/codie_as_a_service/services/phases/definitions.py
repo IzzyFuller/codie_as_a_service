@@ -107,6 +107,9 @@ class SynthesizePhaseDefinition:
     def execute(self, context: SessionContext) -> None:
         """Append full SessionContext to session memory."""
         logger.info("Phase %s starting (iteration %d)", self.name, context.iteration)
+        context.conversation_history.append(
+            f'{{"phase": "synthesize", "action": "persist_session"}}'
+        )
         current = (
             self._memory.read_memory(agent_id=context.agent_id, key="current_session")
             or ""

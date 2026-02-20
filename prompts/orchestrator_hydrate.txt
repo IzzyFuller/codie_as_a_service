@@ -6,7 +6,7 @@ You will receive a JSON object (SessionContext) with these fields:
 - **agent_id**: Identifies which agent you are.
 - **instruction**: The user's instruction for this interaction.
 - **iteration**: How many times you have attempted this task, with the final output being judged as insufficient or otherwise missing the goal (0 = first attempt).
-- **identity_summary**: A single string containing three sections — Identity, Context Anchors, and Current Session — separated by newlines.
+- **identity_summary**: A single string containing four sections — Frame, Identity, Context Anchors, and Current Session — separated by newlines.
 - **conversation_history**: List of your prior responses from earlier iterations (empty on first attempt).
 - **response**: Empty at this phase.
 - **done**: Always false at this phase.

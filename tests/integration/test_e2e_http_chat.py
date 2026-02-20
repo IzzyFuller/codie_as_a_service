@@ -69,6 +69,35 @@ class TestE2EHTTPChat:
         error_data = error_events[0]["data"]
         assert "message" in error_data
 
+    def test_chat_returns_error_for_agent_without_frame(self, test_app):
+        """
+        Given: An agent exists with identity but no frame file
+        When: Client POSTs to /chat
+        Then: Client receives error response about missing frame
+        """
+        agent_id, session_id = test_app.setup_agent(
+            memory={
+                "me": "# Identity",
+                "context_anchors": "# Anchors",
+                "current_session": "# Session",
+            }
+        )
+        test_app.stub_phases(
+            process=[
+                LLMResponseSpec(
+                    stop_reason="end_turn", content="Should not reach here"
+                ),
+            ],
+        )
+
+        events = test_app.chat(agent_id, session_id, "Hello")
+
+        error_events = [e for e in events if e["event"] == "error"]
+        assert len(error_events) == 1, "Expected exactly one error event"
+        assert "frame" in error_events[0]["data"]["message"].lower()
+
+        test_app.reset_llm()
+
     def test_tool_using_request_completes_successfully(self, test_app):
         """
         Given: Client sends a request that would trigger tool use

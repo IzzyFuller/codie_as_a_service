@@ -18,6 +18,7 @@ class TestGetIdentityContext:
         Then: Only the last 2 lines of current_session are included
         """
         adapter = LocalMemoryAdapter(base_dir=tmp_path)
+        adapter.write_file(agent_id="tess", key="frame", content="# Frame")
         adapter.write_file(agent_id="tess", key="me", content="# Tess")
         adapter.write_file(agent_id="tess", key="context_anchors", content="# Anchors")
         adapter.write_file(
@@ -38,6 +39,7 @@ class TestGetIdentityContext:
         Then: The full current_session content is returned
         """
         adapter = LocalMemoryAdapter(base_dir=tmp_path)
+        adapter.write_file(agent_id="tess", key="frame", content="# Frame")
         adapter.write_file(agent_id="tess", key="me", content="# Tess")
         adapter.write_file(agent_id="tess", key="context_anchors", content="# Anchors")
         full_content = "line one\nline two\nline three\nline four"
@@ -47,3 +49,20 @@ class TestGetIdentityContext:
         result = service.get_identity_context(agent_id="tess")
 
         assert result.current_session == full_content
+
+    def test_get_identity_context_includes_frame(self, tmp_path):
+        """
+        Given: An agent with a frame file in memory
+        When: get_identity_context is called
+        Then: The result includes the frame content
+        """
+        adapter = LocalMemoryAdapter(base_dir=tmp_path)
+        adapter.write_file(agent_id="tess", key="frame", content="# Tess Frame")
+        adapter.write_file(agent_id="tess", key="me", content="# Tess")
+        adapter.write_file(agent_id="tess", key="context_anchors", content="# Anchors")
+        adapter.write_file(agent_id="tess", key="current_session", content="# Session")
+        service = MemoryService(storage=adapter)
+
+        result = service.get_identity_context(agent_id="tess")
+
+        assert result.frame == "# Tess Frame"

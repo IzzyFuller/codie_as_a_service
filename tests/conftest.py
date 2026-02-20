@@ -662,6 +662,7 @@ class TestApp:
         # Default minimal memory if not specified
         if memory is None:
             memory = {
+                "frame": "# Frame",
                 "me": "# Identity",
                 "context_anchors": "# Anchors",
                 "current_session": "# Session",

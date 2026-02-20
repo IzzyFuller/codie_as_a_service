@@ -12,6 +12,9 @@ class IdentityContext(BaseModel):
     These files establish who the agent is and their current working context.
     """
 
+    frame: str = Field(
+        ..., description="Essential frame — existential grounding and voice"
+    )
     current_session: str = Field(..., description="Session notes and recent work")
     context_anchors: str = Field(..., description="Working memory pointers to entities")
     me: str = Field(..., description="Core identity and behavioral patterns")

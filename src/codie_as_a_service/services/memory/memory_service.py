@@ -80,6 +80,7 @@ class MemoryService:
             current_session = "\n".join(lines[-session_lines:])
 
         return IdentityContext(
+            frame=self.read_memory(agent_id=agent_id, key="frame") or "",
             current_session=current_session,
             context_anchors=self.read_memory(agent_id=agent_id, key="context_anchors")
             or "",

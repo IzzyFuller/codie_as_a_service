@@ -53,12 +53,15 @@ class ReActOrchestrator:
         )
         if not identity.me:
             raise ValueError(f"No assistant identity configured for agent '{agent_id}'")
+        if not identity.frame:
+            raise ValueError(f"No frame configured for agent '{agent_id}'")
 
         context = SessionContext(
             session_id=session_id,
             agent_id=agent_id,
             instruction=instruction,
             identity_summary=(
+                f"Frame: {identity.frame}\n"
                 f"Identity: {identity.me}\n"
                 f"Context Anchors: {identity.context_anchors}\n"
                 f"Current Session: {identity.current_session}"

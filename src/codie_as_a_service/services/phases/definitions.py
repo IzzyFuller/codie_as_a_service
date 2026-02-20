@@ -105,7 +105,7 @@ class SynthesizePhaseDefinition:
         self._memory = memory
 
     def execute(self, context: SessionContext) -> None:
-        """Append current interaction to session memory."""
+        """Append full SessionContext to session memory."""
         logger.info("Phase %s starting (iteration %d)", self.name, context.iteration)
         current = (
             self._memory.read_memory(agent_id=context.agent_id, key="current_session")
@@ -113,9 +113,7 @@ class SynthesizePhaseDefinition:
         )
         entry = (
             f"\n\n## Interaction (iteration {context.iteration})\n"
-            f"**Session:** {context.session_id}\n"
-            f"**Instruction:** {context.instruction}\n"
-            f"**Response:** {context.response}\n"
+            f"{context.model_dump_json(indent=2)}\n"
         )
         self._memory.write_memory(
             agent_id=context.agent_id,

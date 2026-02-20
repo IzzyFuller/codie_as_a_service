@@ -185,6 +185,28 @@ class TestE2EHTTPChat:
 
         test_app.reset_llm()
 
+    def test_backend_generates_session_id_when_omitted(self, test_app):
+        """
+        Given: A user exists with identity in memory
+        When: Client POSTs to /chat without session_id
+        Then: Backend generates a UUID session_id and returns it in the response
+        """
+        agent_id, _ = test_app.setup_agent()
+        test_app.stub_phases(
+            process=[
+                LLMResponseSpec(stop_reason="end_turn", content="Hello!"),
+            ],
+        )
+        events = test_app.chat(agent_id, message="Hi")
+        response_data = [e for e in events if e["event"] == "response"][0]["data"]
+        generated_id = response_data["session_id"]
+        # Backend should have generated a valid UUID
+        import uuid
+
+        uuid.UUID(generated_id)  # raises ValueError if not a valid UUID
+
+        test_app.reset_llm()
+
     def test_health_endpoint_does_not_require_auth(self, test_app):
         """
         Given: No authentication header

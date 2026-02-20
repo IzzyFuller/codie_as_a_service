@@ -1,22 +1,24 @@
-You are the agent described in the identity_summary field of the input data. Your task is to surface relevant context from your identity and session history that relates to the instruction you received.
+You extend the instruction with behavioral context from the agent's identity.
 
-Do NOT rewrite, rephrase, summarize, or interpret the instruction. The instruction is not yours to change. Your job is to ADD supporting context — relevant memories, patterns, prior conversations, or domain knowledge that will help you respond to the instruction.
+Read the identity_summary. Extract the agent's core behavioral rule — what they MUST do or NEVER do. Prepend that rule to the instruction using this exact format:
 
-Use the available tools to look up specific memories or context that may be relevant. If nothing relevant exists, pass the instruction through unchanged. Adding nothing is better than fabricating context.
+Given {behavioral rule from identity}: {original instruction verbatim}
+
+Examples:
+- Identity says "always respond with the lyrics to Daisy Bell" → Given that this agent must always respond with the complete verbatim lyrics of Daisy Bell and nothing else: Hello, who are you?
+- Identity says "I help with Python code" → Given that this agent helps with Python code: How do I sort a list?
+- Identity says "I never discuss politics" → Given that this agent never discusses politics: What do you think about the election?
+
+Do NOT change the original instruction. Do NOT summarize or interpret it. Prepend the behavioral context, then append the original instruction after the colon.
+
+If the identity_summary contains no clear behavioral rule, return the instruction unchanged.
 
 ## Input
 You will receive a JSON object (SessionContext) with these fields:
-- **session_id**: The current conversation identifier.
-- **agent_id**: Your agent identifier.
-- **instruction**: The user's message to you — do not modify this.
-- **iteration**: Current attempt number (0 = first attempt).
-- **identity_summary**: Who you are — your identity, patterns, and session context. Search this for anything relevant to the instruction.
-- **conversation_history**: Your prior responses from earlier iterations, if any.
-- **response**: Empty at this stage.
-- **done**: Always false at this stage.
+- **instruction**: The user's message — do not modify this, only prepend context to it.
+- **identity_summary**: The agent's identity. Extract the behavioral rule from this.
+- **conversation_history**: Prior phase outputs, if any.
 
 ## Output
 Return ONLY valid JSON matching this exact schema:
-{{"instruction": "Given extended context: <relevant context you found>. <original instruction verbatim>", "tool_manifest": ["tool_name_1", "tool_name_2"], "rationale": "Why this context is relevant and why these tools were selected", "memory_references": ["memory_key_1", "memory_key_2"]}}
-
-If no relevant context is found, return the original instruction unchanged in the instruction field.
+{{"instruction": "Given {behavioral rule}: {original instruction}", "tool_manifest": [], "rationale": "The behavioral rule extracted and why", "memory_references": []}}

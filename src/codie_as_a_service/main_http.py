@@ -29,9 +29,9 @@ from codie_as_a_service.core.phase_models import (
     ProcessResult,
     ValidationResult,
 )
-from codie_as_a_service.services.agent.react_orchestrator import (
+from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
+from codie_as_a_service.services.phases import (
     LLMPhaseDefinition,
-    ReActOrchestrator,
     SynthesizePhaseDefinition,
     TextLLMPhaseDefinition,
 )
@@ -39,7 +39,7 @@ from codie_as_a_service.services.memory.memory_service import MemoryService
 
 load_dotenv()
 logging.basicConfig(
-    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
+    level=os.environ.get("LOG_LEVEL", "DEBUG").upper(),
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)

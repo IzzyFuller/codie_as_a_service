@@ -41,9 +41,7 @@ class TestGetIdentityContext:
         adapter.write_file(agent_id="tess", key="me", content="# Tess")
         adapter.write_file(agent_id="tess", key="context_anchors", content="# Anchors")
         full_content = "line one\nline two\nline three\nline four"
-        adapter.write_file(
-            agent_id="tess", key="current_session", content=full_content
-        )
+        adapter.write_file(agent_id="tess", key="current_session", content=full_content)
         service = MemoryService(storage=adapter)
 
         result = service.get_identity_context(agent_id="tess")

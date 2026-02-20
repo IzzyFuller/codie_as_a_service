@@ -30,7 +30,7 @@ LOOP (max_iterations):
   HYDRATE    -> 1 LLM call    -> HydratedIdentity
   EXTEND     -> mini tool-loop -> ExtendedInstruction (includes tool_manifest)
   PROCESS    -> mini tool-loop -> ProcessResult
-  VALIDATE   -> 1 LLM call    -> ValidationResult {done, justification, feedback}
+  VALIDATE   -> 1 LLM call    -> ValidationResult {done, rationale, feedback}
   SYNTHESIZE -> mini tool-loop -> SynthesisResult (writes to memory = evolved seed)
 
   if completes_request: return
@@ -125,11 +125,11 @@ class ExtendedInstruction(BaseModel):
 class ProcessResult(BaseModel):
     output: str
     tools_used: list[str]
-    trace: str
+    rationale: str
 
 class ValidationResult(BaseModel):
     done: bool
-    justification: str
+    rationale: str
     feedback: str
 
 class SynthesisResult(BaseModel):

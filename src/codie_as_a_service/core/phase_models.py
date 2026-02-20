@@ -66,7 +66,7 @@ class ProcessResult(PhaseOutputModel):
 
     output: str
     tools_used: list[str]
-    trace: str
+    rationale: str
 
     def to_session_context(self, context: SessionContext) -> SessionContext:
         context.response = self.output
@@ -77,7 +77,7 @@ class ValidationResult(PhaseOutputModel):
     """Output of VALIDATE phase: completion check."""
 
     done: bool
-    justification: str
+    rationale: str
     feedback: str
 
     def to_session_context(self, context: SessionContext) -> SessionContext:

@@ -15,7 +15,7 @@ You will receive a JSON object (SessionContext) with these fields:
 Return ONLY valid JSON matching this exact schema:
 {{
   "done": true,
-  "justification": "Why the request is complete (or why it is not)",
+  "rationale": "Why the request is complete (or why it is not)",
   "feedback": "If not done, specific feedback on what needs improvement. If done, empty string."
 }}
 

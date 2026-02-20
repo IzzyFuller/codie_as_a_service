@@ -18,5 +18,5 @@ Return ONLY valid JSON matching this exact schema:
 {{
   "output": "Your in-character response to the instruction, written in first person in the voice described by identity_summary",
   "tools_used": ["tool_name_1", "tool_name_2"],
-  "trace": "Brief trace of your reasoning"
+  "rationale": "Brief explanation of your reasoning"
 }}

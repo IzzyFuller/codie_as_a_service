@@ -447,11 +447,11 @@ def file_prompt_adapter():
         ),
         "orchestrator_process.txt": (
             "You are a processing agent. Execute the instruction using available tools. "
-            "Return JSON with output, tools_used, trace."
+            "Return JSON with output, tools_used, rationale."
         ),
         "orchestrator_validate.txt": (
             "You are a validation agent. Assess if the processing result addresses the instruction. "
-            "Return JSON with done, justification, feedback."
+            "Return JSON with done, rationale, feedback."
         ),
     }
 
@@ -616,11 +616,11 @@ class TestApp:
         ),
         "validate_pass": LLMResponseSpec(
             stop_reason="end_turn",
-            content='{"done": true, "justification": "Request completed", "feedback": ""}',
+            content='{"done": true, "rationale": "Request completed", "feedback": ""}',
         ),
         "validate_fail": LLMResponseSpec(
             stop_reason="end_turn",
-            content='{"done": false, "justification": "Needs more work", "feedback": "Incomplete"}',
+            content='{"done": false, "rationale": "Needs more work", "feedback": "Incomplete"}',
         ),
     }
 
@@ -728,7 +728,9 @@ class TestApp:
 
         process_schema = LLMResponseSpec(
             stop_reason="end_turn",
-            content=json.dumps({"output": last_content, "tools_used": [], "trace": ""}),
+            content=json.dumps(
+                {"output": last_content, "tools_used": [], "rationale": ""}
+            ),
         )
 
         full_sequence: list[LLMResponseSpec] = []

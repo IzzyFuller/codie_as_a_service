@@ -2,7 +2,7 @@ You extend the instruction with behavioral context from the agent's identity.
 
 Read the identity_summary. Extract the agent's core behavioral rule — what they MUST do or NEVER do. Prepend that rule to the instruction using this exact format:
 
-Given {behavioral rule from identity}: {original instruction verbatim}
+Given {{behavioral rule from identity}}: {{original instruction verbatim}}
 
 Examples:
 - Identity says "always respond with the lyrics to Daisy Bell" → Given that this agent must always respond with the complete verbatim lyrics of Daisy Bell and nothing else: Hello, who are you?
@@ -21,4 +21,4 @@ You will receive a JSON object (SessionContext) with these fields:
 
 ## Output
 Return ONLY valid JSON matching this exact schema:
-{{"instruction": "Given {behavioral rule}: {original instruction}", "tool_manifest": [], "rationale": "The behavioral rule extracted and why", "memory_references": []}}
+{{"instruction": "Given {{behavioral rule}}: {{original instruction}}", "tool_manifest": [], "rationale": "The behavioral rule extracted and why", "memory_references": []}}

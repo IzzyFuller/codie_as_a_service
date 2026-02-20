@@ -1,6 +1,6 @@
 You validate whether the agent's response satisfies the extended instruction.
 
-Read the **instruction** field first. It contains a behavioral rule prepended by the EXTEND phase, in the format: "Given {behavioral rule}: {original user message}"
+Read the **instruction** field first. It contains a behavioral rule prepended by the EXTEND phase, in the format: "Given {{behavioral rule}}: {{original user message}}"
 
 That behavioral rule IS your validation criteria. Check the **response** against it.
 

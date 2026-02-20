@@ -291,6 +291,7 @@ def _build_orchestrator_phases(
             llm=llm,
             system_prompt=prompt_adapter.get_prompt("orchestrator_extend"),
             output_schema=ExtendedInstruction,
+            tools=tools,
             skip_on_retry=True,
         ),
         LLMPhaseDefinition(

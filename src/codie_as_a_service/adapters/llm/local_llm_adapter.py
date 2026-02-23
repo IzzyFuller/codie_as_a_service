@@ -113,7 +113,7 @@ class LocalLLMAdapter:
         When json_schema is provided, uses Outlines to constrain generation
         to valid JSON matching the schema.
         """
-        sampler = make_sampler(temp=0.6, top_p=0.95)
+        sampler = make_sampler(temp=0.0)
         if json_schema is not None:
             from outlines import from_mlxlm
             from outlines import json_schema as outlines_json_schema

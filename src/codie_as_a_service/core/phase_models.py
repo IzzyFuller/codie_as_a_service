@@ -69,7 +69,6 @@ class ExtendedInstruction(PhaseOutputModel):
     memory_references: list[str]
 
     def to_session_context(self, context: SessionContext) -> SessionContext:
-        context.instruction = self.instruction
         context.conversation_history.append(f"EXTEND: {self.model_dump_json()}")
         return context
 

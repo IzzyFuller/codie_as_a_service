@@ -58,8 +58,8 @@ class ReActOrchestrator:
             session_id=session_id,
             agent_id=agent_id,
             instruction=instruction,
+            frame=identity.frame,
             identity_summary=(
-                f"Frame: {identity.frame}\n"
                 f"Identity: {identity.me}\n"
                 f"Context Anchors: {identity.context_anchors or ''}\n"
                 f"Current Session: {identity.current_session or ''}"

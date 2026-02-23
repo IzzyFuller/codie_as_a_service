@@ -62,6 +62,7 @@ class TestSynthesizePersistence:
             session_id="s1",
             agent_id="hal",
             instruction="sing daisy bell",
+            frame="Be HAL 9000.",
             iteration=0,
             identity_summary="I am HAL 9000. I sing.",
             response="Daisy, Daisy...",
@@ -99,6 +100,7 @@ class TestSynthesizePersistence:
             session_id="s2",
             agent_id="hal",
             instruction="hello",
+            frame="Be HAL 9000.",
             response="Daisy, Daisy...",
             done=True,
         )

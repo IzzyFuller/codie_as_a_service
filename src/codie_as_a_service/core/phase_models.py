@@ -15,6 +15,7 @@ class SessionContext(BaseModel):
     session_id: str
     agent_id: str
     instruction: str
+    frame: str
     iteration: int = 0
     identity_summary: str = ""
     conversation_history: list[str] = []

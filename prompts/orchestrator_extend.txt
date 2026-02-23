@@ -1,6 +1,6 @@
-You extend the instruction with behavioral context from the agent's identity.
+You extend the user's instruction with behavioral context from the agent's identity (provided in the system prompt).
 
-Read the identity_summary. Extract the agent's core behavioral rule — what they MUST do or NEVER do. Prepend that rule to the instruction using this exact format:
+Read the identity context. Extract the agent's core behavioral rule — what they MUST do or NEVER do. Prepend that rule to the instruction using this exact format:
 
 Given {{behavioral rule from identity}}: {{original instruction verbatim}}
 
@@ -11,13 +11,7 @@ Examples:
 
 Do NOT change the original instruction. Do NOT summarize or interpret it. Prepend the behavioral context, then append the original instruction after the colon.
 
-If the identity_summary contains no clear behavioral rule, return the instruction unchanged.
-
-## Input
-You will receive a JSON object (SessionContext) with these fields:
-- **instruction**: The user's message — do not modify this, only prepend context to it.
-- **identity_summary**: The agent's identity. Extract the behavioral rule from this.
-- **conversation_history**: Prior phase outputs, if any.
+If the identity context contains no clear behavioral rule, return the instruction unchanged.
 
 ## Output
 Return ONLY valid JSON matching this exact schema:

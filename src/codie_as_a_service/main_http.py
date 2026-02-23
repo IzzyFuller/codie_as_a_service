@@ -330,52 +330,32 @@ def main() -> None:
     """Start the HTTP server."""
     # Configuration from environment
     host = os.environ.get("HTTP_HOST")
-    if not host:
-        raise ValueError("HTTP_HOST environment variable is required")
 
-    port_str = os.environ.get("HTTP_PORT")
-    if not port_str:
-        raise ValueError("HTTP_PORT environment variable is required")
-    port = int(port_str)
+    port = int(os.environ.get("HTTP_PORT"))
 
     llm_adapter_type = os.environ.get("LLM_ADAPTER", "claude_cli")
 
     prompts_dir = os.environ.get("PROMPTS_DIR")
-    if not prompts_dir:
-        raise ValueError("PROMPTS_DIR environment variable is required")
 
-    prompt_names_str = os.environ.get("PROMPT_NAMES")
-    if not prompt_names_str:
-        raise ValueError("PROMPT_NAMES environment variable is required")
-    prompt_names = [name.strip() for name in prompt_names_str.split(",")]
+    prompt_names = [name.strip() for name in os.environ.get("PROMPT_NAMES").split(",")]
 
     api_key = os.environ.get("API_KEY")
-    if not api_key:
-        raise ValueError("API_KEY environment variable is required")
-
-    # Path template for agent directory resolution (default: "agents/{agent_id}")
-    # Set to empty string for flat directory (base_dir IS agent dir)
-    storage_path_template = os.environ.get("STORAGE_PATH_TEMPLATE", "agents/{agent_id}")
 
     # Initialize storage adapter
-    storage_dir = os.environ.get("STORAGE_DIR")
-    if not storage_dir:
-        raise ValueError("STORAGE_DIR environment variable is required")
     storage_adapter: MemoryProtocol = LocalMemoryAdapter(
-        base_dir=storage_dir, agent_path_template=storage_path_template
+        base_dir=os.environ.get("STORAGE_DIR"),
+        agent_path_template=os.environ.get(
+            "STORAGE_PATH_TEMPLATE", "agents/{agent_id}"
+        ),
     )
 
     # Initialize LLM adapter based on type
     if llm_adapter_type == "claude_cli":
         llm_adapter: LLMProtocol = ClaudeCliAdapter()
-    elif llm_adapter_type == "local":
+    else:
         model_name = os.environ.get("MODEL_NAME")
-        if not model_name:
-            raise ValueError("MODEL_NAME required when LLM_ADAPTER=local")
         device = os.environ.get("DEVICE", "mps")
         llm_adapter = LocalLLMAdapter(model_name=model_name, device=device)
-    else:
-        raise ValueError(f"Unknown LLM_ADAPTER: {llm_adapter_type}")
 
     prompt_adapter = FilePromptAdapter(prompts_dir=prompts_dir)
 

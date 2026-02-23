@@ -58,9 +58,7 @@ class MemoryService:
         """
         return self.storage.list_files(agent_id=agent_id)
 
-    def get_identity_context(
-        self, agent_id: str, session_lines: int | None = None
-    ) -> IdentityContext:
+    def get_identity_context(self, agent_id: str) -> IdentityContext:
         """
         Load core identity files for an agent.
 
@@ -71,18 +69,10 @@ class MemoryService:
         Returns:
             IdentityContext with current_session, context_anchors, and me
         """
-        current_session = (
-            self.read_memory(agent_id=agent_id, key="current_session") or ""
-        )
-
-        if session_lines is not None and current_session:
-            lines = current_session.splitlines()
-            current_session = "\n".join(lines[-session_lines:])
 
         return IdentityContext(
-            frame=self.read_memory(agent_id=agent_id, key="frame") or "",
-            current_session=current_session,
-            context_anchors=self.read_memory(agent_id=agent_id, key="context_anchors")
-            or "",
-            me=self.read_memory(agent_id=agent_id, key="me") or "",
+            frame=self.read_memory(agent_id=agent_id, key="frame"),
+            current_session=self.read_memory(agent_id=agent_id, key="current_session"),
+            context_anchors=self.read_memory(agent_id=agent_id, key="context_anchors"),
+            me=self.read_memory(agent_id=agent_id, key="me"),
         )

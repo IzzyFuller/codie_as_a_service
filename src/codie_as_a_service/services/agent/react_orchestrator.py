@@ -26,13 +26,11 @@ class ReActOrchestrator:
         phases: list[Phase],
         post_phases: list[Phase] | None = None,
         max_outer_iterations: int = 3,
-        session_lines: int | None = None,
     ) -> None:
         self._memory = memory
         self._phases = phases
         self._post_phases = post_phases or []
         self._max_outer_iterations = max_outer_iterations
-        self._session_lines = session_lines
 
     def run(
         self,
@@ -50,9 +48,7 @@ class ReActOrchestrator:
         if output_format is None:
             output_format = SessionContext
 
-        identity = self._memory.get_identity_context(
-            agent_id=agent_id, session_lines=self._session_lines
-        )
+        identity = self._memory.get_identity_context(agent_id=agent_id)
         if not identity.me:
             raise ValueError(f"No assistant identity configured for agent '{agent_id}'")
         if not identity.frame:
@@ -65,8 +61,8 @@ class ReActOrchestrator:
             identity_summary=(
                 f"Frame: {identity.frame}\n"
                 f"Identity: {identity.me}\n"
-                f"Context Anchors: {identity.context_anchors}\n"
-                f"Current Session: {identity.current_session}"
+                f"Context Anchors: {identity.context_anchors or ''}\n"
+                f"Current Session: {identity.current_session or ''}"
             ),
         )
 
@@ -81,4 +77,5 @@ class ReActOrchestrator:
 
         for post_phase in self._post_phases:
             post_phase.execute(context)
+
         return output_format.model_validate(context.model_dump())

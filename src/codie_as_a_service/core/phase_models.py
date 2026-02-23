@@ -55,7 +55,7 @@ class HydratedIdentity(PhaseOutputModel):
 
     def to_session_context(self, context: SessionContext) -> SessionContext:
         context.identity_summary = self.text_output
-        context.conversation_history.append(self.model_dump_json())
+        context.conversation_history.append(f"HYDRATE: {self.model_dump_json()}")
         return context
 
 
@@ -69,7 +69,7 @@ class ExtendedInstruction(PhaseOutputModel):
 
     def to_session_context(self, context: SessionContext) -> SessionContext:
         context.instruction = self.instruction
-        context.conversation_history.append(self.model_dump_json())
+        context.conversation_history.append(f"EXTEND: {self.model_dump_json()}")
         return context
 
 
@@ -82,7 +82,7 @@ class ProcessResult(PhaseOutputModel):
 
     def to_session_context(self, context: SessionContext) -> SessionContext:
         context.response = self.output
-        context.conversation_history.append(self.model_dump_json())
+        context.conversation_history.append(f"PROCESS: {self.model_dump_json()}")
         return context
 
 
@@ -95,5 +95,5 @@ class ValidationResult(PhaseOutputModel):
 
     def to_session_context(self, context: SessionContext) -> SessionContext:
         context.done = self.done
-        context.conversation_history.append(self.model_dump_json())
+        context.conversation_history.append(f"VALIDATE: {self.model_dump_json()}")
         return context

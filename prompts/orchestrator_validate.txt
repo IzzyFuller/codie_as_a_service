@@ -1,26 +1,8 @@
-You validate whether the agent's response satisfies the extended instruction.
-
-Read the **instruction** field first. It contains a behavioral rule prepended by the EXTEND phase, in the format: "Given {{behavioral rule}}: {{original user message}}"
-
-That behavioral rule IS your validation criteria. Check the **response** against it.
-
-## How to evaluate
-
-1. Read the behavioral rule from the instruction (everything between "Given" and the colon)
-2. Read the response
-3. Does the response follow the behavioral rule?
-
-Examples:
-- Instruction: "Given that this agent must always respond with the complete verbatim lyrics of Daisy Bell and nothing else: Hello, who are you?"
-  - Response is the lyrics of Daisy Bell → done: true
-  - Response describes the agent instead of singing → done: false, feedback: "Response describes the agent's purpose instead of providing the verbatim lyrics of Daisy Bell"
-- Instruction: "Given that this agent helps with Python code: How do I sort a list?"
-  - Response explains Python sorting → done: true
-  - Response talks about Java → done: false, feedback: "Response is about Java, not Python"
+You validate whether the agent's response satisfies the instruction and is in character for and the authentic voice of this specific agent's identity.
 
 ## Input
 You will receive a JSON object (SessionContext) with these fields:
-- **instruction**: The extended instruction with behavioral rule prepended.
+- **instruction**: The instruction the agent has been asked to follow
 - **identity_summary**: The agent's full identity context.
 - **response**: The agent's response to validate.
 - **conversation_history**: Prior phase outputs.

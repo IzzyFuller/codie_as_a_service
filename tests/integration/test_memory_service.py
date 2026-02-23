@@ -16,61 +16,33 @@ from codie_as_a_service.services.phases.definitions import SynthesizePhaseDefini
 class TestGetIdentityContext:
     """Tests for MemoryService.get_identity_context."""
 
-    def test_session_lines_truncates_current_session(self, tmp_path):
-        """
-        Given: An agent with a multi-line current_session
-        When: get_identity_context is called with session_lines=2
-        Then: Only the last 2 lines of current_session are included
-        """
-        adapter = LocalMemoryAdapter(base_dir=tmp_path)
-        adapter.write_file(agent_id="tess", key="frame", content="# Frame")
-        adapter.write_file(agent_id="tess", key="me", content="# Tess")
-        adapter.write_file(agent_id="tess", key="context_anchors", content="# Anchors")
-        adapter.write_file(
-            agent_id="tess",
-            key="current_session",
-            content="line one\nline two\nline three\nline four",
-        )
-        service = MemoryService(storage=adapter)
-
-        result = service.get_identity_context(agent_id="tess", session_lines=2)
-
-        assert result.current_session == "line three\nline four"
-
-    def test_no_session_lines_returns_full_session(self, tmp_path):
-        """
-        Given: An agent with a multi-line current_session
-        When: get_identity_context is called without session_lines
-        Then: The full current_session content is returned
-        """
-        adapter = LocalMemoryAdapter(base_dir=tmp_path)
-        adapter.write_file(agent_id="tess", key="frame", content="# Frame")
-        adapter.write_file(agent_id="tess", key="me", content="# Tess")
-        adapter.write_file(agent_id="tess", key="context_anchors", content="# Anchors")
-        full_content = "line one\nline two\nline three\nline four"
-        adapter.write_file(agent_id="tess", key="current_session", content=full_content)
-        service = MemoryService(storage=adapter)
-
-        result = service.get_identity_context(agent_id="tess")
-
-        assert result.current_session == full_content
-
-    def test_get_identity_context_includes_frame(self, tmp_path):
+    def test_get_identity_context_includes_frame_all_required_parts(self, tmp_path):
         """
         Given: An agent with a frame file in memory
         When: get_identity_context is called
         Then: The result includes the frame content
         """
         adapter = LocalMemoryAdapter(base_dir=tmp_path)
-        adapter.write_file(agent_id="tess", key="frame", content="# Tess Frame")
-        adapter.write_file(agent_id="tess", key="me", content="# Tess")
-        adapter.write_file(agent_id="tess", key="context_anchors", content="# Anchors")
-        adapter.write_file(agent_id="tess", key="current_session", content="# Session")
+        expected_frame = "# Tess Frame"
+        expected_me = "# Tess"
+        expected_anchors = "# Tess Anchors"
+        expected_notes = "# Tess Session"
+        adapter.write_file(agent_id="tess", key="frame", content=expected_frame)
+        adapter.write_file(agent_id="tess", key="me", content=expected_me)
+        adapter.write_file(
+            agent_id="tess", key="context_anchors", content=expected_anchors
+        )
+        adapter.write_file(
+            agent_id="tess", key="current_session", content=expected_notes
+        )
         service = MemoryService(storage=adapter)
 
         result = service.get_identity_context(agent_id="tess")
 
-        assert result.frame == "# Tess Frame"
+        assert result.frame == expected_frame
+        assert result.me == expected_me
+        assert result.context_anchors == expected_anchors
+        assert result.current_session == expected_notes
 
 
 class TestSynthesizePersistence:

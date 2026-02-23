@@ -12,6 +12,8 @@ from typing import Any
 
 from mlx_lm import generate, load
 from mlx_lm.sample_utils import make_sampler
+from outlines import from_mlxlm
+from outlines import json_schema as outlines_json_schema
 
 from codie_as_a_service.core.models import (
     ContentBlock,
@@ -115,9 +117,6 @@ class LocalLLMAdapter:
         """
         sampler = make_sampler(temp=0.0)
         if json_schema is not None:
-            from outlines import from_mlxlm
-            from outlines import json_schema as outlines_json_schema
-
             outlines_model = from_mlxlm(self._model, self._tokenizer)
             return outlines_model(
                 prompt,

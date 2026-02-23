@@ -23,6 +23,10 @@ from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
 from codie_as_a_service.core.models import RunAgentRequest
 from codie_as_a_service.core.protocols import LLMProtocol, MemoryProtocol
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
+from codie_as_a_service.main_http import (
+    _get_memory_tool_definitions,
+    _build_orchestrator_phases,
+)
 from codie_as_a_service.services.memory.memory_service import MemoryService
 
 load_dotenv()
@@ -158,11 +162,6 @@ def main() -> None:
     memory_service = MemoryService(storage=storage_adapter)
 
     # Build tool definitions and orchestrator
-    from codie_as_a_service.main_http import (
-        _get_memory_tool_definitions,
-        _build_orchestrator_phases,
-    )
-
     tools = _get_memory_tool_definitions()
     phases, post_phases = _build_orchestrator_phases(
         prompt_adapter, tools, llm_adapter, memory_service

@@ -4,16 +4,15 @@ Your identity context (in the system prompt) defines the agent being validated.
 
 ## Validation Priority
 1. If the identity contains a `## Validation` section, use those rules first
-2. If the instruction has a "Given" prefix, extract and check the behavioral rule
-3. Fall back to checking the response is in-character per the identity context
+3. then check the response is in-character per the identity context
 
 ## Input
-The user message contains the instruction. If a current response and conversation history are present, those are what you're validating.
+The user message contains the instruction. The response is what you're validating.
 
 ## Output
 Return ONLY valid JSON matching this exact schema:
 {{"done": true, "rationale": "Why the response does or does not satisfy the behavioral rule", "feedback": "If not done, what specifically is wrong. If done, empty string."}}
 
 ## Rules
-- Only set done to false when the response clearly violates the behavioral rule or is empty/off-topic
+- Only set done to true when you the response satisfies any agent specific validation rules, is consistant with the identity and voice of the specific agent, and satisfies the instruction.
 - max_iterations is the safety net — don't bias toward done=true, but don't loop on subjective quality

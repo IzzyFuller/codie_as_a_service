@@ -287,7 +287,7 @@ def _build_orchestrator_phases(
         Tuple of (loop_phases, post_phases). Loop phases run each iteration;
         post_phases run once after the loop completes (done=true or max iterations).
     """
-    phases = [
+    phases: list[Phase] = [
         TextLLMPhaseDefinition(
             name="hydrate",
             llm=llm,
@@ -317,7 +317,7 @@ def _build_orchestrator_phases(
             output_schema=ValidationResult,
         ),
     ]
-    post_phases = [
+    post_phases: list[Phase] = [
         SynthesizePhaseDefinition(
             name="synthesize",
             memory=memory,
@@ -337,7 +337,7 @@ def main() -> None:
 
     prompts_dir = os.environ.get("PROMPTS_DIR")
 
-    prompt_names = [name.strip() for name in os.environ.get("PROMPT_NAMES").split(",")]
+    prompt_names = [name.strip() for name in os.environ["PROMPT_NAMES"].split(",")]
 
     api_key = os.environ.get("API_KEY")
 

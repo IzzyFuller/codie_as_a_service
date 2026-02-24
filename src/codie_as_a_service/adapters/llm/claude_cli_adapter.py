@@ -97,7 +97,7 @@ class ClaudeCliAdapter:
         prompt: str,
         system_prompt: str,
         json_schema: dict[str, Any] | None = None,
-        tools: list[ToolDefinition] = (),
+        tools: list[ToolDefinition] | None = None,
     ) -> str:
         """
         Run Claude CLI and return result text.
@@ -125,7 +125,7 @@ class ClaudeCliAdapter:
         if json_schema is not None:
             cmd.extend(["--json-schema", json.dumps(json_schema)])
 
-        cmd.extend(["--allowedTools", ",".join(t.name for t in tools)])
+        cmd.extend(["--allowedTools", ",".join(t.name for t in (tools or []))])
 
         result = subprocess.run(
             cmd,
@@ -166,10 +166,10 @@ class ClaudeCliAdapter:
 
         # --json-schema puts structured data in a separate field (as a dict)
         if json_schema is not None and "structured_output" in response:
-            result = json.dumps(response["structured_output"])
-            logger.debug("Structured output: %r", result[:500])
-            return result
+            output = json.dumps(response["structured_output"])
+            logger.debug("Structured output: %r", output[:500])
+            return output
 
-        result = response.get("result", "")
-        logger.debug("Raw result value: %r", result[:500] if result else result)
-        return result
+        output = response.get("result", "")
+        logger.debug("Raw result value: %r", output[:500] if output else output)
+        return output

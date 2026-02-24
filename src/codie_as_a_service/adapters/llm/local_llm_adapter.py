@@ -45,7 +45,7 @@ class LocalLLMAdapter:
             device: Kept for backward compatibility (ignored - MLX handles device placement)
         """
         logger.info("Loading model %s via MLX", model_name)
-        self._model, self._tokenizer = load(model_name)
+        self._model, self._tokenizer = load(model_name)  # type: ignore[misc]
         logger.info("Model loaded successfully")
 
     DEFAULT_MAX_NEW_TOKENS = 2048

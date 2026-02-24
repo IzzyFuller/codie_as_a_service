@@ -39,10 +39,8 @@ class LLMPhaseDefinition:
         logger.info("Phase %s starting (iteration %d)", self.name, context.iteration)
         self._output_schema.model_validate(
             self._llm.call(
-                messages=[Message(role="user", content="\n".join(
-                    [context.instruction, context.response, *context.conversation_history],
-                ))],
-                system_prompt="\n".join([context.identity_summary, self._system_prompt]),
+                messages=[Message(role="user", content=f"{context.instruction}{context.response}{context.conversation_history}")],
+                system_prompt=f"{context.identity_summary}{self._system_prompt}",
                 tools=self._tools,
                 output_format={
                     "type": "json_schema",
@@ -62,12 +60,14 @@ class TextLLMPhaseDefinition:
         llm: LLMProtocol,
         system_prompt: str,
         output_schema: type[PhaseOutputModel],
+        tools: list[ToolDefinition] | None = None,
         skip_on_retry: bool = False,
     ) -> None:
         self.name = name
         self._llm = llm
         self._system_prompt = system_prompt
         self._output_schema = output_schema
+        self._tools = tools or []
         self._skip_on_retry = skip_on_retry
 
     def execute(self, context: SessionContext) -> None:
@@ -77,10 +77,9 @@ class TextLLMPhaseDefinition:
             return
         logger.info("Phase %s starting (iteration %d)", self.name, context.iteration)
         response = self._llm.call(
-            messages=[Message(role="user", content="\n".join(
-                [context.instruction, context.response, *context.conversation_history],
-            ))],
-            system_prompt="\n".join([context.identity_summary, self._system_prompt]),
+            messages=[Message(role="user", content=f"{context.instruction}{context.response}{context.conversation_history}")],
+            system_prompt=f"{context.identity_summary}{self._system_prompt}",
+            tools=self._tools,
         )
         self._output_schema(text_output=response.content[0].text).to_session_context(
             context

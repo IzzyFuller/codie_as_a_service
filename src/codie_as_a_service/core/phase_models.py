@@ -60,13 +60,10 @@ class HydratedIdentity(PhaseOutputModel):
         return context
 
 
-class ExtendedInstruction(PhaseOutputModel):
-    """Output of EXTEND phase: enriched instruction with tool selection."""
+class ExtendedContext(PhaseOutputModel):
+    """Output of EXTEND phase: plain-text enriched context."""
 
-    instruction: str
-    tool_manifest: list[str]
-    rationale: str
-    memory_references: list[str]
+    text_output: str
 
     def to_session_context(self, context: SessionContext) -> SessionContext:
         context.conversation_history.append(f"EXTEND: {self.model_dump_json()}")

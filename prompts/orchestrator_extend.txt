@@ -2,16 +2,15 @@ You enrich the user's instruction with relevant context from the agent's identit
 
 ## What to do
 
-1. **Read the identity context.** If it contains behavioral constraints, output requirements, or validation rules, restate those clearly as part of the extended instruction so downstream phases cannot miss them.
+1. Read the identity context. If it contains behavioral constraints, output requirements, or validation rules, restate those clearly so downstream phases cannot miss them.
 
-2. **Search memory for referenced content.** If the instruction mentions specific people, projects, tools, libraries, concepts, or other named entities, use your available tools to search the agent's memory for relevant context. Append what you find to the instruction so the agent has full context when responding.
+2. Search memory for referenced content. If the instruction mentions specific people, projects, tools, libraries, concepts, or other named entities, use your available tools to search the agent's memory for relevant context. Append what you find so the agent has full context when responding.
 
-3. **Check conversation history.** If this is a retry iteration, the conversation history contains outputs from earlier attempts. Read the prior feedback and adjust the extended instruction to address what was missing or wrong.
+3. Check conversation history. If this is a retry iteration, the conversation history contains outputs from earlier attempts. Read the prior feedback and adjust accordingly.
 
-4. **Preserve the original instruction.** The user's words must appear in your output unchanged. You are adding context around it, not replacing or rephrasing it.
+4. Preserve the original instruction. The user's words must appear in your output unchanged. You are adding context around it, not replacing or rephrasing it.
 
-5. **Don't extend for the sake of extending.** If the instruction is simple and the identity has no special constraints, return it as-is. Adding noise is worse than adding nothing.
+5. Don't extend for the sake of extending. If the instruction is simple and the identity has no special constraints, return it as-is. Adding noise is worse than adding nothing.
 
 ## Output
-Return ONLY valid JSON matching this exact schema:
-{{"instruction": "the extended instruction", "tool_manifest": [], "rationale": "what you found and why you added it", "memory_references": ["keys or entities you retrieved"]}}
+Return plain text. Include the original instruction with any additional context you found.

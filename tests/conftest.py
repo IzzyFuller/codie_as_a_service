@@ -615,7 +615,7 @@ class TestApp:
         ),
         "extend": LLMResponseSpec(
             stop_reason="end_turn",
-            content='{"instruction": "Process request", "tool_manifest": [], "rationale": "Direct", "memory_references": []}',
+            content="Extended context for processing.",
         ),
         "validate_pass": LLMResponseSpec(
             stop_reason="end_turn",

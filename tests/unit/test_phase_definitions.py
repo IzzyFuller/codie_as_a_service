@@ -103,3 +103,4 @@ class TestExecute:
         assert messages[0].role == "user"
         assert "hello" in messages[0].content
         assert "session_id" not in messages[0].content
+

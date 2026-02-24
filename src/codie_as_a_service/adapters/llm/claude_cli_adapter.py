@@ -36,7 +36,7 @@ class ClaudeCliAdapter:
         self,
         messages: list[Message],
         system_prompt: str,
-        tools: list[ToolDefinition] | None = None,
+        tools: list[ToolDefinition] = [],
         output_format: dict[str, Any] | None = None,
         max_new_tokens: int | None = None,
     ) -> LLMResponse:
@@ -71,7 +71,7 @@ class ClaudeCliAdapter:
 
         # Single call — Claude Code handles tools natively
         result = self._run_claude(
-            prompt, system_prompt, json_schema=json_schema, tools=tools or []
+            prompt, system_prompt, json_schema=json_schema, tools=tools
         )
         logger.info("Claude CLI returned %d chars", len(result))
         logger.debug("Result: %.500s", result)
@@ -97,7 +97,7 @@ class ClaudeCliAdapter:
         prompt: str,
         system_prompt: str,
         json_schema: dict[str, Any] | None = None,
-        tools: list[ToolDefinition] | None = None,
+        tools: list[ToolDefinition] = [],
     ) -> str:
         """
         Run Claude CLI and return result text.
@@ -125,7 +125,7 @@ class ClaudeCliAdapter:
         if json_schema is not None:
             cmd.extend(["--json-schema", json.dumps(json_schema)])
 
-        cmd.extend(["--allowedTools", ",".join(t.name for t in (tools or []))])
+        cmd.extend(["--allowedTools", ",".join(t.name for t in tools)])
 
         result = subprocess.run(
             cmd,

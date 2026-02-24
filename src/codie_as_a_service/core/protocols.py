@@ -63,7 +63,7 @@ class LLMProtocol(Protocol):
         self,
         messages: list["Message"],
         system_prompt: str,
-        tools: list["ToolDefinition"] | None = None,
+        tools: list["ToolDefinition"] = [],
         output_format: dict[str, Any] | None = None,
         max_new_tokens: int | None = None,
     ) -> "LLMResponse":

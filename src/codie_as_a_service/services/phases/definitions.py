@@ -11,15 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class LLMPhaseDefinition:
-    """Phase backed by an LLM call.
-
-    Owns its LLM adapter, system prompt, tools, and output schema.
-    execute() calls the LLM, validates the response against the schema,
-    and applies the result to the session context.
-
-    Message building: identity goes into system prompt, instruction into
-    user message. Each phase's prompt tells the LLM what to pay attention to.
-    """
+    """Phase backed by an LLM call with structured JSON output."""
 
     def __init__(
         self,
@@ -39,22 +31,6 @@ class LLMPhaseDefinition:
         self._max_new_tokens = max_new_tokens
         self._skip_on_retry = skip_on_retry
 
-    def _build_system_prompt(self, context: SessionContext) -> str:
-        """Build system prompt: identity_summary + phase instructions."""
-        if context.identity_summary:
-            return f"{context.identity_summary}\n\n{self._system_prompt}"
-        return self._system_prompt
-
-    def _build_user_message(self, context: SessionContext) -> str:
-        """Build user message: instruction + non-empty context fields."""
-        parts = [context.instruction]
-        if context.response:
-            parts.append(f"\n\n## Current Response\n{context.response}")
-        if context.conversation_history:
-            history = "\n".join(context.conversation_history)
-            parts.append(f"\n\n## Conversation History\n{history}")
-        return "".join(parts)
-
     def execute(self, context: SessionContext) -> None:
         """Call LLM, validate response, apply to context."""
         if self._skip_on_retry and context.iteration > 0:
@@ -63,8 +39,10 @@ class LLMPhaseDefinition:
         logger.info("Phase %s starting (iteration %d)", self.name, context.iteration)
         self._output_schema.model_validate(
             self._llm.call(
-                messages=[Message(role="user", content=self._build_user_message(context))],
-                system_prompt=self._build_system_prompt(context),
+                messages=[Message(role="user", content="\n".join(
+                    [context.instruction, context.response, *context.conversation_history],
+                ))],
+                system_prompt="\n".join([context.identity_summary, self._system_prompt]),
                 tools=self._tools,
                 output_format={
                     "type": "json_schema",
@@ -76,15 +54,7 @@ class LLMPhaseDefinition:
 
 
 class TextLLMPhaseDefinition:
-    """Phase backed by an LLM call that returns plain text.
-
-    No structured output schema — the LLM returns free-form text which
-    is written directly to a named field on the session context.
-    Saves the extra formatting turn that schema validation requires.
-
-    Message building: same as LLMPhaseDefinition — identity in system
-    prompt, instruction in user message.
-    """
+    """Phase backed by an LLM call that returns plain text."""
 
     def __init__(
         self,
@@ -100,22 +70,6 @@ class TextLLMPhaseDefinition:
         self._output_schema = output_schema
         self._skip_on_retry = skip_on_retry
 
-    def _build_system_prompt(self, context: SessionContext) -> str:
-        """Build system prompt: identity_summary + phase instructions."""
-        if context.identity_summary:
-            return f"{context.identity_summary}\n\n{self._system_prompt}"
-        return self._system_prompt
-
-    def _build_user_message(self, context: SessionContext) -> str:
-        """Build user message: instruction + non-empty context fields."""
-        parts = [context.instruction]
-        if context.response:
-            parts.append(f"\n\n## Current Response\n{context.response}")
-        if context.conversation_history:
-            history = "\n".join(context.conversation_history)
-            parts.append(f"\n\n## Conversation History\n{history}")
-        return "".join(parts)
-
     def execute(self, context: SessionContext) -> None:
         """Call LLM, wrap text in output schema, apply to context."""
         if self._skip_on_retry and context.iteration > 0:
@@ -123,8 +77,10 @@ class TextLLMPhaseDefinition:
             return
         logger.info("Phase %s starting (iteration %d)", self.name, context.iteration)
         response = self._llm.call(
-            messages=[Message(role="user", content=self._build_user_message(context))],
-            system_prompt=self._build_system_prompt(context),
+            messages=[Message(role="user", content="\n".join(
+                [context.instruction, context.response, *context.conversation_history],
+            ))],
+            system_prompt="\n".join([context.identity_summary, self._system_prompt]),
         )
         self._output_schema(text_output=response.content[0].text).to_session_context(
             context

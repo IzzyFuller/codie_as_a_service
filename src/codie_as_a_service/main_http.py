@@ -300,7 +300,6 @@ def _build_orchestrator_phases(
             system_prompt=prompt_adapter.get_prompt("orchestrator_extend"),
             output_schema=ExtendedContext,
             tools=tools,
-            skip_on_retry=True,
         ),
         LLMPhaseDefinition(
             name="process",

@@ -249,7 +249,10 @@ def create_local_llm_adapter():
     mock_tokenizer = MagicMock()
     mock_model = MagicMock()
 
-    with patch("mlx_lm.load") as mock_load:
+    with (
+        patch("codie_as_a_service.adapters.llm.local_llm_adapter.load") as mock_load,
+        patch("codie_as_a_service.adapters.llm.local_llm_adapter.from_mlxlm"),
+    ):
         mock_load.return_value = (mock_model, mock_tokenizer)
         adapter = LocalLLMAdapter(model_name="test-model")
 
@@ -712,11 +715,11 @@ class TestApp:
         """
         Configure LLM mock with per-phase response sequences.
 
-        SYNTHESIZE is deterministic (no LLM call). HYDRATE and EXTEND
-        have skip_on_retry=True, so only run on iteration 0.
+        SYNTHESIZE is deterministic (no LLM call). HYDRATE has
+        skip_on_retry=True, so only runs on iteration 0.
 
         Iteration 0: HYDRATE + EXTEND + PROCESS + VALIDATE = 4 LLM calls
-        Iteration 1+: PROCESS + VALIDATE = 2 LLM calls
+        Iteration 1+: EXTEND + PROCESS + VALIDATE = 3 LLM calls
 
         Args:
             hydrate: Custom HYDRATE phase response (1 schema call)
@@ -741,18 +744,20 @@ class TestApp:
         for i in range(iterations):
             is_last = i == iterations - 1
 
-            # HYDRATE + EXTEND — only on iteration 0 (skip_on_retry=True)
+            # HYDRATE — only on iteration 0 (skip_on_retry=True)
             if i == 0:
                 full_sequence.extend(
                     self._build_phase(
                         hydrate[0] if hydrate else self._PHASE_DEFAULTS["hydrate"]
                     )
                 )
-                full_sequence.extend(
-                    self._build_phase(
-                        extend[0] if extend else self._PHASE_DEFAULTS["extend"]
-                    )
+
+            # EXTEND — runs every iteration (context may change after retry)
+            full_sequence.extend(
+                self._build_phase(
+                    extend[0] if extend else self._PHASE_DEFAULTS["extend"]
                 )
+            )
 
             # PROCESS — 1 call (adapter handles tools internally)
             full_sequence.extend(self._build_phase(process_schema))

@@ -39,7 +39,12 @@ class LLMPhaseDefinition:
         logger.info("Phase %s starting (iteration %d)", self.name, context.iteration)
         self._output_schema.model_validate(
             self._llm.call(
-                messages=[Message(role="user", content=f"{context.instruction}{context.response}{context.conversation_history}")],
+                messages=[
+                    Message(
+                        role="user",
+                        content=f"{context.instruction}{context.response}{context.conversation_history}",
+                    )
+                ],
                 system_prompt=f"{context.identity_summary}{self._system_prompt}",
                 tools=self._tools,
                 output_format={
@@ -77,13 +82,21 @@ class TextLLMPhaseDefinition:
             return
         logger.info("Phase %s starting (iteration %d)", self.name, context.iteration)
         response = self._llm.call(
-            messages=[Message(role="user", content=f"{context.instruction}{context.response}{context.conversation_history}")],
+            messages=[
+                Message(
+                    role="user",
+                    content=f"{context.instruction}{context.response}{context.conversation_history}",
+                )
+            ],
             system_prompt=f"{context.identity_summary}{self._system_prompt}",
             tools=self._tools,
         )
-        self._output_schema(text_output=response.content[0].text).to_session_context(
-            context
+        # Extract text from first content block (filter out tool use blocks)
+        text_output = next(
+            (block.text for block in response.content if hasattr(block, "text")),
+            "",
         )
+        self._output_schema(text_output=text_output).to_session_context(context)
 
 
 class SynthesizePhaseDefinition:

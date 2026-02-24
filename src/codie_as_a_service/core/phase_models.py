@@ -28,6 +28,19 @@ class SessionContext(BaseModel):
 # =============================================================================
 
 
+class DefaultOutput(BaseModel):
+    """Default output shape returned to clients when no output_format is specified."""
+
+    response: str = ""
+    session_id: str = ""
+    done: bool = False
+
+
+# =============================================================================
+# Phase Output Base
+# =============================================================================
+
+
 class PhaseOutputModel(BaseModel):
     """Base for all phase output models.
 

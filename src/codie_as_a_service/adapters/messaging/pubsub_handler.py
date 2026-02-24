@@ -53,7 +53,6 @@ class AgentMessageHandler:
                 session_id=request.session_id,
                 agent_id=request.agent_id,
                 instruction=request.message,
-                output_format=request.output_format,
             )
             response_data = {
                 "output": result.response,

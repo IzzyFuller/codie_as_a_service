@@ -10,11 +10,6 @@ import json
 import logging
 from typing import Any
 
-from mlx_lm import generate, load
-from mlx_lm.sample_utils import make_sampler
-from outlines import from_mlxlm
-from outlines import json_schema as outlines_json_schema
-
 from codie_as_a_service.core.models import (
     ContentBlock,
     LLMResponse,
@@ -44,6 +39,8 @@ class LocalLLMAdapter:
             model_name: Model identifier (e.g., "mlx-community/SmolLM3-3B-Base-4bit")
             device: Kept for backward compatibility (ignored - MLX handles device placement)
         """
+        from mlx_lm import load
+
         logger.info("Loading model %s via MLX", model_name)
         self._model, self._tokenizer = load(model_name)  # type: ignore[misc]
         logger.info("Model loaded successfully")
@@ -115,8 +112,14 @@ class LocalLLMAdapter:
         When json_schema is provided, uses Outlines to constrain generation
         to valid JSON matching the schema.
         """
+        from mlx_lm import generate
+        from mlx_lm.sample_utils import make_sampler
+
         sampler = make_sampler(temp=0.0)
         if json_schema is not None:
+            from outlines import from_mlxlm
+            from outlines import json_schema as outlines_json_schema
+
             outlines_model = from_mlxlm(self._model, self._tokenizer)
             return outlines_model(
                 prompt,

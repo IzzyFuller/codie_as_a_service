@@ -249,7 +249,7 @@ def create_local_llm_adapter():
     mock_tokenizer = MagicMock()
     mock_model = MagicMock()
 
-    with patch("codie_as_a_service.adapters.llm.local_llm_adapter.load") as mock_load:
+    with patch("mlx_lm.load") as mock_load:
         mock_load.return_value = (mock_model, mock_tokenizer)
         adapter = LocalLLMAdapter(model_name="test-model")
 

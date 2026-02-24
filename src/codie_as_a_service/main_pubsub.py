@@ -135,6 +135,13 @@ def main() -> None:
 
     # Initialize messaging
     connection = pika.BlockingConnection(pika.URLParameters(broker_url))
+
+    # Declare queues so the app owns its infrastructure
+    setup_channel = connection.channel()
+    setup_channel.queue_declare(queue=request_subscription, durable=True)
+    setup_channel.queue_declare(queue=response_topic, durable=True)
+    setup_channel.close()
+
     publisher = RabbitMQPublisher(connection)
     subscriber = RabbitMQSubscriber(connection)
 

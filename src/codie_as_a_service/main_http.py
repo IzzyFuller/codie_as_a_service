@@ -111,7 +111,6 @@ def create_app(
                 session_id=session_id,
                 agent_id=agent_id,
                 instruction=message,
-                output_format=output_format,
             )
 
             # Emit structured response

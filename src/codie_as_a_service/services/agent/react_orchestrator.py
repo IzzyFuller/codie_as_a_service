@@ -4,7 +4,7 @@ import logging
 
 from pydantic import BaseModel
 
-from codie_as_a_service.core.phase_models import SessionContext
+from codie_as_a_service.core.phase_models import DefaultOutput, SessionContext
 from codie_as_a_service.core.protocols import Phase
 from codie_as_a_service.services.memory.memory_service import MemoryService
 
@@ -46,7 +46,7 @@ class ReActOrchestrator:
         from the final context state.
         """
         if output_format is None:
-            output_format = SessionContext
+            output_format = DefaultOutput
 
         identity = self._memory.get_identity_context(agent_id=agent_id)
         if not identity.me:

@@ -6,6 +6,7 @@ Implements MessageHandler protocol from synapse.
 from synapse.protocols.publisher import PubSubPublisher
 
 from codie_as_a_service.core.models import RunAgentRequest, AgentResponse
+from codie_as_a_service.core.schema_utils import json_schema_to_model
 from codie_as_a_service.services.memory.memory_service import MemoryService
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
 
@@ -49,16 +50,25 @@ class AgentMessageHandler:
             request: Validated RunAgentRequest (parsed by MessageConsumer)
         """
         try:
+            output_model = (
+                json_schema_to_model(request.output_format)
+                if request.output_format
+                else None
+            )
             result = self._orchestrator.run(
                 session_id=request.session_id,
                 agent_id=request.agent_id,
                 instruction=request.message,
+                output_format=output_model,
             )
-            response_data = {
-                "output": result.response,
-                "session_id": result.session_id,
-                "done": result.done,
-            }
+            if request.output_format:
+                response_data = result.model_dump()
+            else:
+                response_data = {
+                    "output": result.response,
+                    "session_id": result.session_id,
+                    "done": result.done,
+                }
             status = "success"
 
         except ValueError as e:

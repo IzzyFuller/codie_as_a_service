@@ -11,6 +11,7 @@ If we change LLM adapters, only TestApp needs to change - not these tests.
 """
 
 import json
+import uuid
 
 import pytest
 
@@ -162,11 +163,14 @@ class TestE2EHTTPChat:
 
         test_app.reset_llm()
 
-    def test_structured_output_returns_structured_event(self, test_app):
+    def test_structured_output_returns_custom_schema_shape(self, test_app):
         """
-        Given: Client sends request with output_format schema
+        Given: Client sends request with output_format JSON schema
         When: Agent processes the request
-        Then: Client receives SSE stream with response event containing JSON data
+        Then: Client receives response shaped to the custom schema, not DefaultOutput
+
+        This is the critical test: output_format must flow from request → orchestrator
+        and reshape the response to match the caller's schema.
         """
         agent_id, session_id = test_app.setup_agent()
 
@@ -178,10 +182,20 @@ class TestE2EHTTPChat:
             ],
         )
 
+        output_schema = {
+            "type": "object",
+            "properties": {
+                "response": {"type": "string"},
+                "done": {"type": "boolean"},
+            },
+            "required": ["response", "done"],
+        }
+
         events = test_app.chat(
             agent_id,
             session_id,
             "Extract contact: John ([email protected])",
+            output_format=output_schema,
         )
 
         response_events = [e for e in events if e["event"] == "response"]
@@ -191,8 +205,15 @@ class TestE2EHTTPChat:
         assert len(done_events) == 1, "Expected exactly one done event"
 
         response_data = response_events[0]["data"]
-        assert response_data["output"] == "John's email is [email protected]"
+        # Custom schema: only "response" and "done" — no "output" or "session_id"
+        assert "response" in response_data
         assert "done" in response_data
+        assert "output" not in response_data, (
+            "Custom schema should not include DefaultOutput's 'output' field"
+        )
+        assert "session_id" not in response_data, (
+            "Custom schema should not include fields outside the requested schema"
+        )
 
         test_app.reset_llm()
 
@@ -232,8 +253,6 @@ class TestE2EHTTPChat:
         response_data = [e for e in events if e["event"] == "response"][0]["data"]
         generated_id = response_data["session_id"]
         # Backend should have generated a valid UUID
-        import uuid
-
         uuid.UUID(generated_id)  # raises ValueError if not a valid UUID
 
         test_app.reset_llm()

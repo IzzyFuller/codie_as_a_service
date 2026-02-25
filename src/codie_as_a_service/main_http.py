@@ -25,6 +25,7 @@ from codie_as_a_service.core.protocols import (
     PromptProtocol,
 )
 from codie_as_a_service.core.models import ToolDefinition
+from codie_as_a_service.core.schema_utils import json_schema_to_model
 from codie_as_a_service.core.phase_models import (
     ExtendedContext,
     HydratedIdentity,
@@ -107,18 +108,25 @@ def create_app(
         """Generate SSE events for chat response."""
         try:
             # Process through orchestrator
+            output_model = (
+                json_schema_to_model(output_format) if output_format else None
+            )
             session_context = orchestrator.run(
                 session_id=session_id,
                 agent_id=agent_id,
                 instruction=message,
+                output_format=output_model,
             )
 
             # Emit structured response
-            response_payload = {
-                "output": session_context.response,
-                "session_id": session_context.session_id,
-                "done": session_context.done,
-            }
+            if output_format:
+                response_payload = session_context.model_dump()
+            else:
+                response_payload = {
+                    "output": session_context.response,
+                    "session_id": session_context.session_id,
+                    "done": session_context.done,
+                }
             yield f"event: response\ndata: {json.dumps(response_payload)}\n\n"
 
             # Emit done event

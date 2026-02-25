@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel
+from typing import Any
+
+from pydantic import BaseModel, Field
 
 # =============================================================================
 # Session Context (generic pipeline state)
@@ -21,6 +23,7 @@ class SessionContext(BaseModel):
     conversation_history: list[str] = []
     response: str = ""
     done: bool = False
+    output_format_override: Any = Field(default=None, exclude=True)
 
 
 # =============================================================================

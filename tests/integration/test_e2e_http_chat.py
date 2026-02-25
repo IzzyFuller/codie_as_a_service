@@ -169,27 +169,28 @@ class TestE2EHTTPChat:
         When: Agent processes the request
         Then: Client receives response shaped to the custom schema, not DefaultOutput
 
-        This is the critical test: output_format must flow from request → orchestrator
-        and reshape the response to match the caller's schema.
+        This is the critical test: output_format must flow from request → orchestrator,
+        PROCESS must use the custom schema, and the response must match it.
         """
         agent_id, session_id = test_app.setup_agent()
-
-        test_app.stub_phases(
-            process=[
-                LLMResponseSpec(
-                    stop_reason="end_turn", content="John's email is [email protected]"
-                ),
-            ],
-        )
 
         output_schema = {
             "type": "object",
             "properties": {
-                "response": {"type": "string"},
-                "done": {"type": "boolean"},
+                "name": {"type": "string"},
+                "email": {"type": "string"},
             },
-            "required": ["response", "done"],
         }
+
+        test_app.stub_phases(
+            process=[
+                LLMResponseSpec(
+                    stop_reason="end_turn",
+                    content=json.dumps({"name": "John", "email": "[email protected]"}),
+                ),
+            ],
+            output_format=output_schema,
+        )
 
         events = test_app.chat(
             agent_id,
@@ -205,14 +206,12 @@ class TestE2EHTTPChat:
         assert len(done_events) == 1, "Expected exactly one done event"
 
         response_data = response_events[0]["data"]
-        # Custom schema: only "response" and "done" — no "output" or "session_id"
-        assert "response" in response_data
-        assert "done" in response_data
+        # Custom schema fields populated by PROCESS
+        assert response_data["name"] == "John"
+        assert response_data["email"] == "[email protected]"
+        # DefaultOutput fields should NOT be present
         assert "output" not in response_data, (
             "Custom schema should not include DefaultOutput's 'output' field"
-        )
-        assert "session_id" not in response_data, (
-            "Custom schema should not include fields outside the requested schema"
         )
 
         test_app.reset_llm()

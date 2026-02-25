@@ -1,5 +1,6 @@
 """ReActOrchestrator - Multi-phase orchestration loop."""
 
+import json
 import logging
 
 from pydantic import BaseModel
@@ -54,6 +55,8 @@ class ReActOrchestrator:
         if not identity.frame:
             raise ValueError(f"No frame configured for agent '{agent_id}'")
 
+        is_custom_output = output_format is not DefaultOutput
+
         context = SessionContext(
             session_id=session_id,
             agent_id=agent_id,
@@ -64,6 +67,7 @@ class ReActOrchestrator:
                 f"Context Anchors: {identity.context_anchors or ''}\n"
                 f"Current Session: {identity.current_session or ''}"
             ),
+            output_format_override=output_format if is_custom_output else None,
         )
 
         for iteration in range(self._max_outer_iterations):
@@ -78,4 +82,6 @@ class ReActOrchestrator:
         for post_phase in self._post_phases:
             post_phase.execute(context)
 
-        return output_format.model_validate(context.model_dump())
+        if is_custom_output:
+            return output_format.model_validate(json.loads(context.response))
+        return DefaultOutput.model_validate(context.model_dump())

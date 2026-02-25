@@ -65,22 +65,30 @@ class TestE2EAgentPubSub:
         Then: Client receives AgentResponse with response_data shaped to custom schema
 
         This is the critical test: output_format must flow from RunAgentRequest
-        through to orchestrator.run() and reshape the response.
+        through to orchestrator.run(), PROCESS must use the custom schema,
+        and the response must match it.
         """
         agent_id, session_id = pubsub_test_app.setup_agent()
 
-        pubsub_test_app.stub_llm_responses(
-            LLMResponseSpec(stop_reason="end_turn", content="Jane is 30 years old"),
-        )
+        import json
 
         output_schema = {
             "type": "object",
             "properties": {
-                "response": {"type": "string"},
-                "done": {"type": "boolean"},
+                "name": {"type": "string"},
+                "age": {"type": "integer"},
             },
-            "required": ["response", "done"],
         }
+
+        pubsub_test_app.stub_phases(
+            process=[
+                LLMResponseSpec(
+                    stop_reason="end_turn",
+                    content=json.dumps({"name": "Jane", "age": 30}),
+                ),
+            ],
+            output_format=output_schema,
+        )
 
         response = pubsub_test_app.send_pubsub_request(
             agent_id,
@@ -94,9 +102,10 @@ class TestE2EAgentPubSub:
         assert response.session_id == session_id
         assert response.status == "success"
         assert response.response_data is not None
-        # Custom schema: only "response" and "done" — not DefaultOutput's "output"
-        assert "response" in response.response_data
-        assert "done" in response.response_data
+        # Custom schema fields populated by PROCESS
+        assert response.response_data["name"] == "Jane"
+        assert response.response_data["age"] == 30
+        # DefaultOutput fields should NOT be present
         assert "output" not in response.response_data, (
             "Custom schema should not include DefaultOutput's 'output' field"
         )

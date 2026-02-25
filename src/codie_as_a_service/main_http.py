@@ -315,6 +315,7 @@ def _build_orchestrator_phases(
             system_prompt=prompt_adapter.get_prompt("orchestrator_process"),
             tools=tools,
             output_schema=ProcessResult,
+            use_caller_output_schema=True,
         ),
         LLMPhaseDefinition(
             name="validate",

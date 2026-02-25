@@ -711,6 +711,7 @@ class TestApp:
         process: list[LLMResponseSpec] | None = None,
         validate: list[LLMResponseSpec] | None = None,
         iterations: int = 1,
+        output_format: dict | None = None,
     ) -> None:
         """
         Configure LLM mock with per-phase response sequences.
@@ -727,18 +728,26 @@ class TestApp:
             process: Custom PROCESS phase response (1 schema call; adapter handles tools)
             validate: Custom VALIDATE phase response (1 schema call)
             iterations: Number of orchestrator iterations (last validates pass)
+            output_format: When set, PROCESS uses raw content (caller's schema format)
         """
         # Derive content-dependent defaults from process responses
         last_content = ""
         if process:
             last_content = process[-1].content or ""
 
-        process_schema = LLMResponseSpec(
-            stop_reason="end_turn",
-            content=json.dumps(
-                {"output": last_content, "tools_used": [], "rationale": ""}
-            ),
-        )
+        if output_format:
+            # Custom output schema — process content is already in target format
+            process_schema = LLMResponseSpec(
+                stop_reason="end_turn",
+                content=last_content,
+            )
+        else:
+            process_schema = LLMResponseSpec(
+                stop_reason="end_turn",
+                content=json.dumps(
+                    {"output": last_content, "tools_used": [], "rationale": ""}
+                ),
+            )
 
         full_sequence: list[LLMResponseSpec] = []
         for i in range(iterations):

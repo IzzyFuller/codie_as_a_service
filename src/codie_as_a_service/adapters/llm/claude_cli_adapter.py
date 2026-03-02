@@ -11,9 +11,9 @@ import os
 import subprocess
 from typing import Any
 
+from pydantic import BaseModel
+
 from codie_as_a_service.core.models import (
-    ContentBlock,
-    LLMResponse,
     Message,
     ToolDefinition,
 )
@@ -37,9 +37,9 @@ class ClaudeCliAdapter:
         messages: list[Message],
         system_prompt: str,
         tools: list[ToolDefinition] = [],
-        output_format: dict[str, Any] | None = None,
+        output_model: type[BaseModel] | None = None,
         max_new_tokens: int | None = None,
-    ) -> LLMResponse:
+    ) -> BaseModel | str:
         """
         Call Claude CLI with messages, tools, and optional structured output.
 
@@ -50,11 +50,11 @@ class ClaudeCliAdapter:
             messages: Conversation history in domain format
             system_prompt: System prompt for the agent
             tools: Optional tool definitions (handled natively by Claude Code)
-            output_format: Optional JSON Schema for structured output (--json-schema)
+            output_model: Optional Pydantic model for structured output (--json-schema)
             max_new_tokens: Ignored (Claude CLI manages token limits internally)
 
         Returns:
-            Structured LLMResponse with final result (tools already resolved)
+            Validated Pydantic model when output_model is given, plain text otherwise
         """
         prompt = self._build_prompt(messages)
         logger.info(
@@ -65,9 +65,7 @@ class ClaudeCliAdapter:
         logger.debug("Prompt: %.300s", prompt)
 
         # Extract JSON schema for structured output
-        json_schema = None
-        if output_format and output_format.get("type") == "json_schema":
-            json_schema = output_format.get("schema")
+        json_schema = output_model.model_json_schema() if output_model else None
 
         # Single call — Claude Code handles tools natively
         result = self._run_claude(
@@ -76,13 +74,10 @@ class ClaudeCliAdapter:
         logger.info("Claude CLI returned %d chars", len(result))
         logger.debug("Result: %.500s", result)
 
-        # No tool call parsing needed — Claude Code resolved them internally
-        data = json.loads(result) if output_format else None
-        return LLMResponse(
-            stop_reason="end_turn",
-            content=[ContentBlock(text=result)],
-            data=data,
-        )
+        # Return validated model or plain text
+        if output_model is not None:
+            return output_model.model_validate_json(result)
+        return result
 
     def _build_prompt(self, messages: list[Message]) -> str:
         """Build prompt string from messages."""

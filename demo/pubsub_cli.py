@@ -14,7 +14,7 @@ import uuid
 
 from google.cloud import pubsub_v1
 
-from codie_as_a_service.core.models import RunAgentRequest, AgentResponse
+from codie_as_a_service.adapters.messaging.models import RunAgentRequest, AgentResponse
 
 
 # Configuration from environment

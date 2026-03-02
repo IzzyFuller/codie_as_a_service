@@ -3,7 +3,7 @@
 from pydantic import BaseModel
 
 from codie_as_a_service.core.phase_models import PhaseOutputModel, SessionContext
-from codie_as_a_service.core.schema_utils import json_schema_to_model
+from codie_as_a_service.services.schema_utils import json_schema_to_model
 
 
 class TestJsonSchemaToModel:

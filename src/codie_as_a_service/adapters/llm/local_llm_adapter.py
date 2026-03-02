@@ -14,10 +14,9 @@ from mlx_lm import generate, load
 from mlx_lm.sample_utils import make_sampler
 from outlines import from_mlxlm
 from outlines import json_schema as outlines_json_schema
+from pydantic import BaseModel
 
 from codie_as_a_service.core.models import (
-    ContentBlock,
-    LLMResponse,
     Message,
     ToolDefinition,
 )
@@ -57,9 +56,9 @@ class LocalLLMAdapter:
         messages: list[Message],
         system_prompt: str,
         tools: list[ToolDefinition] = [],
-        output_format: dict[str, Any] | None = None,
+        output_model: type[BaseModel] | None = None,
         max_new_tokens: int | None = None,
-    ) -> LLMResponse:
+    ) -> BaseModel | str:
         """
         Call local LLM using MLX.
 
@@ -70,11 +69,11 @@ class LocalLLMAdapter:
             messages: Conversation history in domain format
             system_prompt: System prompt for the agent
             tools: Optional tool definitions (passed to xml_tools)
-            output_format: Optional JSON Schema for structured output
+            output_model: Optional Pydantic model for structured output
             max_new_tokens: Max tokens to generate (default: 2048)
 
         Returns:
-            Structured LLMResponse with final result (tools already resolved)
+            Validated Pydantic model when output_model is given, plain text otherwise
         """
         # Convert to chat format
         chat_messages = self._prepare_messages(messages, system_prompt)
@@ -94,20 +93,15 @@ class LocalLLMAdapter:
         effective_max_tokens = max_new_tokens or self.DEFAULT_MAX_NEW_TOKENS
         logger.info("Generating (max_new_tokens=%d)", effective_max_tokens)
 
-        json_schema = None
-        if output_format and output_format.get("type") == "json_schema":
-            json_schema = output_format["schema"]
+        json_schema = output_model.model_json_schema() if output_model else None
 
         # Single call — _generate handles tool loop internally in production
         text = self._generate(prompt, effective_max_tokens, json_schema=json_schema)
 
-        # Return final result as text content (tools already resolved)
-        data = json.loads(text) if output_format else None
-        return LLMResponse(
-            stop_reason="end_turn",
-            content=[ContentBlock(text=text)],
-            data=data,
-        )
+        # Return validated model or plain text
+        if output_model is not None:
+            return output_model.model_validate_json(text)
+        return text
 
     def _generate(  # pragma: no cover
         self, prompt: str, max_tokens: int, *, json_schema: dict | None = None

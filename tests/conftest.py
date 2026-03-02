@@ -7,7 +7,7 @@ import subprocess
 import tempfile
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -19,7 +19,7 @@ from starlette.testclient import TestClient as StarletteTestClient
 
 from synapse.adapters.rabbitmq import RabbitMQPublisher, RabbitMQSubscriber
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
-from codie_as_a_service.core.models import RunAgentRequest, AgentResponse
+from codie_as_a_service.adapters.messaging.models import RunAgentRequest, AgentResponse
 from codie_as_a_service.services.memory.memory_service import MemoryService
 from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
 from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
@@ -38,15 +38,6 @@ from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrat
 
 
 @dataclass
-class ToolCallSpec:
-    """Domain-level tool call specification for tests."""
-
-    name: str
-    arguments: dict = field(default_factory=dict)
-    id: str = field(default_factory=lambda: f"tool_{uuid.uuid4().hex[:8]}")
-
-
-@dataclass
 class LLMResponseSpec:
     """
     Domain-level LLM response specification for tests.
@@ -55,9 +46,7 @@ class LLMResponseSpec:
     these to adapter-specific formats internally.
     """
 
-    stop_reason: str  # "end_turn" | "tool_use"
     content: str | None = None
-    tool_calls: list[ToolCallSpec] = field(default_factory=list)
 
 
 # Test configuration
@@ -357,15 +346,17 @@ class TestClient:
 
     def __init__(
         self,
+        connection: pika.BlockingConnection,
         publisher: RabbitMQPublisher,
         subscriber: RabbitMQSubscriber,
         request_subscription: str,
-        response_subscription: str,
+        response_topic: str,
     ):
+        self._connection = connection
         self._publisher = publisher
         self._subscriber = subscriber
         self._request_subscription = request_subscription
-        self._response_subscription = response_subscription
+        self._response_topic = response_topic
 
     def send_request(
         self,
@@ -375,7 +366,13 @@ class TestClient:
         output_format: dict | None = None,
         timeout_seconds: int = 10,
     ):
-        """Publish request and wait for response."""
+        """Publish request and wait for response on agent-specific queue."""
+        # Declare agent-specific response queue (matches handler routing)
+        agent_response_queue = f"{self._response_topic}.{agent_id}"
+        setup_channel = self._connection.channel()
+        setup_channel.queue_declare(queue=agent_response_queue, durable=True)
+        setup_channel.close()
+
         request = RunAgentRequest(
             agent_id=agent_id,
             session_id=session_id,
@@ -387,12 +384,12 @@ class TestClient:
             f":{self._request_subscription}", request.model_dump_json().encode("utf-8")
         ).result()
 
-        # Wait for response
+        # Wait for response on agent-specific queue
         deadline = time.time() + timeout_seconds
         while time.time() < deadline:
             pull_response = self._subscriber.pull(
                 request={
-                    "subscription": self._response_subscription,
+                    "subscription": agent_response_queue,
                     "max_messages": 1,
                 },
                 timeout=1,
@@ -401,7 +398,7 @@ class TestClient:
                 msg = pull_response.received_messages[0]
                 self._subscriber.acknowledge(
                     request={
-                        "subscription": self._response_subscription,
+                        "subscription": agent_response_queue,
                         "ack_ids": [msg.ack_id],
                     }
                 )
@@ -420,10 +417,11 @@ def test_client(rabbitmq_connection, rabbitmq_infrastructure):
         pika.ConnectionParameters(host="localhost", port=RABBITMQ_PORT)
     )
     return TestClient(
+        connection=client_connection,
         publisher=RabbitMQPublisher(client_connection),
         subscriber=RabbitMQSubscriber(client_connection),
         request_subscription=REQUEST_SUBSCRIPTION,
-        response_subscription=RESPONSE_SUBSCRIPTION,
+        response_topic=RESPONSE_TOPIC,
     )
 
 
@@ -613,19 +611,15 @@ class TestApp:
 
     _PHASE_DEFAULTS = {
         "hydrate": LLMResponseSpec(
-            stop_reason="end_turn",
             content="Test identity summary for orchestrator testing.",
         ),
         "extend": LLMResponseSpec(
-            stop_reason="end_turn",
             content="Extended context for processing.",
         ),
         "validate_pass": LLMResponseSpec(
-            stop_reason="end_turn",
             content='{"done": true, "rationale": "Request completed", "feedback": ""}',
         ),
         "validate_fail": LLMResponseSpec(
-            stop_reason="end_turn",
             content='{"done": false, "rationale": "Needs more work", "feedback": "Incomplete"}',
         ),
     }
@@ -643,7 +637,7 @@ class TestApp:
         self._pubsub_client = pubsub_client
         self._is_claude_cli = isinstance(llm_adapter, ClaudeCliAdapter)
         self._default_response = self._to_adapter_response(
-            LLMResponseSpec(stop_reason="end_turn", content="I'm ready to help you.")
+            LLMResponseSpec(content="I'm ready to help you.")
         )
 
     def setup_agent(
@@ -738,12 +732,10 @@ class TestApp:
         if output_format:
             # Custom output schema — process content is already in target format
             process_schema = LLMResponseSpec(
-                stop_reason="end_turn",
                 content=last_content,
             )
         else:
             process_schema = LLMResponseSpec(
-                stop_reason="end_turn",
                 content=json.dumps(
                     {"output": last_content, "tools_used": [], "rationale": ""}
                 ),
@@ -880,27 +872,11 @@ class TestApp:
         """
         Convert domain-level spec to text that the adapter will parse.
 
-        This is the ONLY place that knows about adapter response format.
-        - ClaudeCliAdapter: returns text directly (tools handled natively)
-        - LocalLLMAdapter: encodes tool calls as <tool_call> XML tags
+        Both adapters return plain text from their mocked internal methods
+        (_generate for local, _run_claude for CLI). The call() method
+        handles parsing/validation.
         """
-        content_parts = []
-        if spec.content:
-            content_parts.append(spec.content)
-
-        if self._is_claude_cli:
-            # ClaudeCliAdapter handles tools natively — just return text content.
-            # Tool calls in the spec are ignored (Claude Code resolves them internally).
-            pass
-        else:
-            # LocalLLMAdapter format: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
-            for tc in spec.tool_calls:
-                tool_call_json = json.dumps(
-                    {"name": tc.name, "arguments": tc.arguments}
-                )
-                content_parts.append(f"<tool_call>{tool_call_json}</tool_call>")
-
-        return " ".join(content_parts) if content_parts else ""
+        return spec.content or ""
 
 
 @pytest.fixture(scope="function")

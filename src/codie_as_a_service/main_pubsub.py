@@ -20,7 +20,7 @@ from codie_as_a_service.adapters.messaging.pubsub_handler import AgentMessageHan
 from synapse.adapters.rabbitmq import RabbitMQPublisher, RabbitMQSubscriber
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
 from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
-from codie_as_a_service.core.models import RunAgentRequest
+from codie_as_a_service.adapters.messaging.models import RunAgentRequest
 from codie_as_a_service.core.protocols import LLMProtocol, MemoryProtocol
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
 from codie_as_a_service.main_http import (
@@ -136,10 +136,10 @@ def main() -> None:
     # Initialize messaging
     connection = pika.BlockingConnection(pika.URLParameters(broker_url))
 
-    # Declare queues so the app owns its infrastructure
+    # Declare request queue — CaaS owns the queue it consumes from.
+    # Response queues are declared by consumers (e.g. executive_functioning).
     setup_channel = connection.channel()
     setup_channel.queue_declare(queue=request_subscription, durable=True)
-    setup_channel.queue_declare(queue=response_topic, durable=True)
     setup_channel.close()
 
     publisher = RabbitMQPublisher(connection)

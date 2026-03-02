@@ -21,7 +21,6 @@ class LLMPhaseDefinition:
         output_schema: type[PhaseOutputModel],
         tools: list[ToolDefinition] = [],
         max_new_tokens: int | None = None,
-        use_caller_output_schema: bool = False,
     ) -> None:
         self.name = name
         self._llm = llm
@@ -29,34 +28,24 @@ class LLMPhaseDefinition:
         self._output_schema = output_schema
         self._tools = tools
         self._max_new_tokens = max_new_tokens
-        self._use_caller_output_schema = use_caller_output_schema
 
     def execute(self, context: SessionContext) -> None:
         """Call LLM, validate response, apply to context."""
         logger.info("Phase %s starting (iteration %d)", self.name, context.iteration)
-        schema = self._output_schema
-        if (
-            self._use_caller_output_schema
-            and context.output_format_override is not None
-        ):
-            schema = context.output_format_override
-        schema.model_validate(
-            self._llm.call(
-                messages=[
-                    Message(
-                        role="user",
-                        content=f"{context.instruction}{context.response}{context.conversation_history}",
-                    )
-                ],
-                system_prompt=f"{context.identity_summary}{self._system_prompt}",
-                tools=self._tools,
-                output_format={
-                    "type": "json_schema",
-                    "schema": schema.model_json_schema(),
-                },
-                max_new_tokens=self._max_new_tokens,
-            ).data
-        ).to_session_context(context)
+        schema = context.output_schema or self._output_schema
+        result = self._llm.call(
+            messages=[
+                Message(
+                    role="user",
+                    content=f"{context.instruction}{context.response}{context.conversation_history}",
+                )
+            ],
+            system_prompt=f"{context.identity_summary}{self._system_prompt}",
+            tools=self._tools,
+            output_model=schema,
+            max_new_tokens=self._max_new_tokens,
+        )
+        result.to_session_context(context)
 
 
 class TextLLMPhaseDefinition:
@@ -84,7 +73,7 @@ class TextLLMPhaseDefinition:
             logger.info("Phase %s skipped (iteration %d)", self.name, context.iteration)
             return
         logger.info("Phase %s starting (iteration %d)", self.name, context.iteration)
-        response = self._llm.call(
+        text_output = self._llm.call(
             messages=[
                 Message(
                     role="user",
@@ -93,11 +82,6 @@ class TextLLMPhaseDefinition:
             ],
             system_prompt=f"{context.identity_summary}{self._system_prompt}",
             tools=self._tools,
-        )
-        # Extract text from first content block (filter out tool use blocks)
-        text_output = next(
-            (block.text for block in response.content if hasattr(block, "text")),
-            "",
         )
         self._output_schema(text_output=text_output).to_session_context(context)
 

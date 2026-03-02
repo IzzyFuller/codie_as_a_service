@@ -53,9 +53,7 @@ class TestExecute:
 
     def test_structured_phase_passes_context_to_llm(self):
         llm = MagicMock()
-        llm.call.return_value = MagicMock(
-            data={"output": "hi", "tools_used": [], "rationale": ""}
-        )
+        llm.call.return_value = ProcessResult(output="hi", tools_used=[], rationale="")
         phase = LLMPhaseDefinition(
             name="process",
             llm=llm,
@@ -79,9 +77,7 @@ class TestExecute:
 
     def test_text_phase_passes_context_to_llm(self):
         llm = MagicMock()
-        mock_response = MagicMock()
-        mock_response.content = [MagicMock(text="I am the restored identity.")]
-        llm.call.return_value = mock_response
+        llm.call.return_value = "I am the restored identity."
 
         phase = TextLLMPhaseDefinition(
             name="hydrate",

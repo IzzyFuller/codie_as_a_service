@@ -25,7 +25,7 @@ from codie_as_a_service.core.protocols import (
     PromptProtocol,
 )
 from codie_as_a_service.core.models import ToolDefinition
-from codie_as_a_service.core.schema_utils import json_schema_to_model
+from codie_as_a_service.services.schema_utils import json_schema_to_model
 from codie_as_a_service.core.phase_models import (
     ExtendedContext,
     HydratedIdentity,
@@ -315,9 +315,9 @@ def _build_orchestrator_phases(
             system_prompt=prompt_adapter.get_prompt("orchestrator_process"),
             tools=tools,
             output_schema=ProcessResult,
-            use_caller_output_schema=True,
+            max_new_tokens=16384,
         ),
-        LLMPhaseDefinition(
+        TextLLMPhaseDefinition(
             name="validate",
             llm=llm,
             system_prompt=prompt_adapter.get_prompt("orchestrator_validate"),

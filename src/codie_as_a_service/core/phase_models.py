@@ -23,7 +23,7 @@ class SessionContext(BaseModel):
     conversation_history: list[str] = []
     response: str = ""
     done: bool = False
-    output_format_override: Any = Field(default=None, exclude=True)
+    output_schema: Any = Field(default=None, exclude=True)
 
 
 # =============================================================================
@@ -99,14 +99,25 @@ class ProcessResult(PhaseOutputModel):
         return context
 
 
-class ValidationResult(PhaseOutputModel):
-    """Output of VALIDATE phase: completion check."""
+class _ValidationFields(BaseModel):
+    """Typed validation of VALIDATE phase JSON output."""
 
     done: bool
     rationale: str
     feedback: str
 
+
+class ValidationResult(PhaseOutputModel):
+    """Output of VALIDATE phase: completion check.
+
+    VALIDATE runs as a TextLLMPhaseDefinition — it never sees
+    context.output_schema. The raw JSON text is parsed internally.
+    """
+
+    text_output: str
+
     def to_session_context(self, context: SessionContext) -> SessionContext:
-        context.done = self.done
-        context.conversation_history.append(f"VALIDATE: {self.model_dump_json()}")
+        fields = _ValidationFields.model_validate_json(self.text_output)
+        context.done = fields.done
+        context.conversation_history.append(f"VALIDATE: {self.text_output}")
         return context

@@ -1,6 +1,5 @@
 """ReActOrchestrator - Multi-phase orchestration loop."""
 
-import json
 import logging
 
 from pydantic import BaseModel
@@ -67,7 +66,7 @@ class ReActOrchestrator:
                 f"Context Anchors: {identity.context_anchors or ''}\n"
                 f"Current Session: {identity.current_session or ''}"
             ),
-            output_format_override=output_format if is_custom_output else None,
+            output_schema=output_format if is_custom_output else None,
         )
 
         for iteration in range(self._max_outer_iterations):
@@ -83,5 +82,5 @@ class ReActOrchestrator:
             post_phase.execute(context)
 
         if is_custom_output:
-            return output_format.model_validate(json.loads(context.response))
+            return output_format.model_validate_json(context.response)
         return DefaultOutput.model_validate(context.model_dump())

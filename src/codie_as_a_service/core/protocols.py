@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+from pydantic import BaseModel
 
 from codie_as_a_service.core.models import (
-    LLMResponse,
     Message,
     ToolDefinition,
 )
@@ -64,9 +65,9 @@ class LLMProtocol(Protocol):
         messages: list["Message"],
         system_prompt: str,
         tools: list["ToolDefinition"] = [],
-        output_format: dict[str, Any] | None = None,
+        output_model: type[BaseModel] | None = None,
         max_new_tokens: int | None = None,
-    ) -> "LLMResponse":
+    ) -> BaseModel | str:
         """
         Call the LLM with messages and optional tools.
 
@@ -74,11 +75,11 @@ class LLMProtocol(Protocol):
             messages: Conversation history
             system_prompt: System prompt for the agent
             tools: Optional list of tool definitions
-            output_format: Optional JSON schema for structured output
+            output_model: Optional Pydantic model for structured output
             max_new_tokens: Optional max tokens to generate (adapter-specific)
 
         Returns:
-            Structured LLM response
+            Validated Pydantic model when output_model is given, plain text otherwise
         """
         ...
 

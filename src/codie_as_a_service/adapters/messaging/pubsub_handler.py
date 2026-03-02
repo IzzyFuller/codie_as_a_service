@@ -3,12 +3,17 @@
 Implements MessageHandler protocol from synapse.
 """
 
+import logging
+
 from synapse.protocols.publisher import PubSubPublisher
 
-from codie_as_a_service.core.models import RunAgentRequest, AgentResponse
-from codie_as_a_service.core.schema_utils import json_schema_to_model
+from codie_as_a_service.adapters.messaging.models import RunAgentRequest, AgentResponse
+from codie_as_a_service.services.schema_utils import json_schema_to_model
 from codie_as_a_service.services.memory.memory_service import MemoryService
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
+
+
+logger = logging.getLogger(__name__)
 
 
 class AgentMessageHandler:
@@ -71,8 +76,8 @@ class AgentMessageHandler:
                 }
             status = "success"
 
-        except ValueError as e:
-            # User-facing errors (e.g., no identity configured)
+        except Exception as e:
+            logger.exception("Agent %s failed: %s", request.agent_id, e)
             response_data = {"error": str(e)}
             status = "error"
 
@@ -84,7 +89,8 @@ class AgentMessageHandler:
             status=status,
         )
 
-        # Publish response
+        # Publish response to agent-specific queue
         response_json = response.model_dump_json().encode("utf-8")
-        future = self.publisher.publish(self.response_topic_path, response_json)
+        agent_response_topic = f"{self.response_topic_path}.{request.agent_id}"
+        future = self.publisher.publish(agent_response_topic, response_json)
         future.result()  # Wait for publish to complete

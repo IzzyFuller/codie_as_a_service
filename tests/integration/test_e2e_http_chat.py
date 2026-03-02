@@ -32,9 +32,7 @@ class TestE2EHTTPChat:
 
         test_app.stub_phases(
             process=[
-                LLMResponseSpec(
-                    stop_reason="end_turn", content="I'm ready to help you."
-                ),
+                LLMResponseSpec(content="I'm ready to help you."),
             ],
         )
 
@@ -87,9 +85,7 @@ class TestE2EHTTPChat:
         )
         test_app.stub_phases(
             process=[
-                LLMResponseSpec(
-                    stop_reason="end_turn", content="Should not reach here"
-                ),
+                LLMResponseSpec(content="Should not reach here"),
             ],
         )
 
@@ -115,9 +111,7 @@ class TestE2EHTTPChat:
 
         test_app.stub_phases(
             process=[
-                LLMResponseSpec(
-                    stop_reason="end_turn", content="Got it, preference saved!"
-                ),
+                LLMResponseSpec(content="Got it, preference saved!"),
             ],
         )
 
@@ -150,9 +144,7 @@ class TestE2EHTTPChat:
 
         test_app.stub_phases(
             process=[
-                LLMResponseSpec(
-                    stop_reason="end_turn", content="You're on PROJECT_ALPHA."
-                ),
+                LLMResponseSpec(content="You're on PROJECT_ALPHA."),
             ],
         )
 
@@ -185,7 +177,6 @@ class TestE2EHTTPChat:
         test_app.stub_phases(
             process=[
                 LLMResponseSpec(
-                    stop_reason="end_turn",
                     content=json.dumps({"name": "John", "email": "[email protected]"}),
                 ),
             ],
@@ -225,7 +216,7 @@ class TestE2EHTTPChat:
         agent_id, session_id = test_app.setup_agent()
         test_app.stub_phases(
             process=[
-                LLMResponseSpec(stop_reason="end_turn", content="Hello!"),
+                LLMResponseSpec(content="Hello!"),
             ],
         )
         events = test_app.chat(agent_id, session_id, "Hi")
@@ -245,7 +236,7 @@ class TestE2EHTTPChat:
         agent_id, _ = test_app.setup_agent()
         test_app.stub_phases(
             process=[
-                LLMResponseSpec(stop_reason="end_turn", content="Hello!"),
+                LLMResponseSpec(content="Hello!"),
             ],
         )
         events = test_app.chat(agent_id, message="Hi")
@@ -306,7 +297,7 @@ class TestE2EHTTPChat:
 
         test_app.stub_phases(
             process=[
-                LLMResponseSpec(stop_reason="end_turn", content="Working on it."),
+                LLMResponseSpec(content="Working on it."),
             ],
             iterations=2,
         )
@@ -334,7 +325,7 @@ class TestE2EHTTPChat:
 
         test_app.stub_phases(
             process=[
-                LLMResponseSpec(stop_reason="end_turn", content="Factory works!"),
+                LLMResponseSpec(content="Factory works!"),
             ],
         )
 
@@ -363,7 +354,7 @@ class TestE2EHTTPChat:
 
         test_app.stub_phases(
             process=[
-                LLMResponseSpec(stop_reason="end_turn", content="Persisted correctly!"),
+                LLMResponseSpec(content="Persisted correctly!"),
             ],
         )
 
@@ -404,7 +395,7 @@ class TestE2EHTTPChat:
         # never passes within the limit - tests the safety exit
         test_app.stub_phases(
             process=[
-                LLMResponseSpec(stop_reason="end_turn", content="Still trying..."),
+                LLMResponseSpec(content="Still trying..."),
             ],
             iterations=4,
         )

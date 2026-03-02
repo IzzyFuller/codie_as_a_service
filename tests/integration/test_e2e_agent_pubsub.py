@@ -30,7 +30,7 @@ class TestE2EAgentPubSub:
         agent_id, session_id = pubsub_test_app.setup_agent()
 
         pubsub_test_app.stub_llm_responses(
-            LLMResponseSpec(stop_reason="end_turn", content="I'm ready to help you."),
+            LLMResponseSpec(content="I'm ready to help you."),
         )
 
         response = pubsub_test_app.send_pubsub_request(
@@ -83,7 +83,6 @@ class TestE2EAgentPubSub:
         pubsub_test_app.stub_phases(
             process=[
                 LLMResponseSpec(
-                    stop_reason="end_turn",
                     content=json.dumps({"name": "Jane", "age": 30}),
                 ),
             ],

@@ -7,11 +7,10 @@ import logging
 
 from synapse.protocols.publisher import PubSubPublisher
 
-from codie_as_a_service.adapters.messaging.models import RunAgentRequest, AgentResponse
-from codie_as_a_service.services.schema_utils import json_schema_to_model
-from codie_as_a_service.services.memory.memory_service import MemoryService
+from codie_as_a_service.adapters.messaging.models import AgentResponse, RunAgentRequest
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
-
+from codie_as_a_service.services.memory.memory_service import MemoryService
+from codie_as_a_service.services.schema_utils import json_schema_to_model
 
 logger = logging.getLogger(__name__)
 
@@ -31,29 +30,13 @@ class AgentMessageHandler:
         publisher: PubSubPublisher,
         orchestrator: ReActOrchestrator,
     ):
-        """
-        Initialize message handler.
-
-        Args:
-            memory_service: Service for reading/writing agent memory
-            response_topic_path: Pub/Sub topic path for publishing responses
-            publisher: Pub/Sub publisher client
-            orchestrator: ReActOrchestrator for processing requests
-        """
         self.memory_service = memory_service
         self.response_topic_path = response_topic_path
         self.publisher = publisher
         self._orchestrator = orchestrator
 
     def handle(self, request: RunAgentRequest) -> None:
-        """
-        Process validated RunAgentRequest and publish response.
-
-        Implements MessageHandler protocol from synapse.
-
-        Args:
-            request: Validated RunAgentRequest (parsed by MessageConsumer)
-        """
+        """Process validated RunAgentRequest and publish response."""
         try:
             output_model = (
                 json_schema_to_model(request.output_format)
@@ -66,14 +49,7 @@ class AgentMessageHandler:
                 instruction=request.message,
                 output_format=output_model,
             )
-            if request.output_format:
-                response_data = result.model_dump()
-            else:
-                response_data = {
-                    "output": result.response,
-                    "session_id": result.session_id,
-                    "done": result.done,
-                }
+            response_data = result.model_dump()
             status = "success"
 
         except Exception as e:

@@ -10,24 +10,24 @@ import threading
 
 import pika
 from dotenv import load_dotenv
+from synapse.adapters.rabbitmq import RabbitMQPublisher, RabbitMQSubscriber
 from synapse.consumer.message_consumer import MessageConsumer
 from synapse.protocols.publisher import PubSubPublisher
 from synapse.protocols.subscriber import PubSubSubscriber
 
 from codie_as_a_service.adapters.llm.claude_cli_adapter import ClaudeCliAdapter
 from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
+from codie_as_a_service.adapters.messaging.models import RunAgentRequest
 from codie_as_a_service.adapters.messaging.pubsub_handler import AgentMessageHandler
-from synapse.adapters.rabbitmq import RabbitMQPublisher, RabbitMQSubscriber
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
 from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
-from codie_as_a_service.adapters.messaging.models import RunAgentRequest
 from codie_as_a_service.core.protocols import LLMProtocol, MemoryProtocol
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
-from codie_as_a_service.main_http import (
-    _get_memory_tool_definitions,
-    _build_orchestrator_phases,
-)
 from codie_as_a_service.services.memory.memory_service import MemoryService
+from codie_as_a_service.services.wiring import (
+    build_orchestrator_phases,
+    get_memory_tool_definitions,
+)
 
 load_dotenv()
 logging.basicConfig(
@@ -117,17 +117,10 @@ def create_app(
 
 def main() -> None:
     """Start the message consumer."""
-    # Configuration from environment
+    # Configuration from environment — crash on missing keys (fail-fast)
     llm_adapter_type = os.environ.get("LLM_ADAPTER", "claude_cli")
-
-    prompts_dir = os.environ.get("PROMPTS_DIR")
-    if not prompts_dir:
-        raise ValueError("PROMPTS_DIR environment variable is required")
-
-    prompt_names_str = os.environ.get("PROMPT_NAMES")
-    if not prompt_names_str:
-        raise ValueError("PROMPT_NAMES environment variable is required")
-    prompt_names = [name.strip() for name in prompt_names_str.split(",")]
+    prompts_dir = os.environ["PROMPTS_DIR"]
+    prompt_names = [name.strip() for name in os.environ["PROMPT_NAMES"].split(",")]
 
     broker_url = os.environ.get("BROKER_URL", "amqp://guest:guest@localhost:5672/")
     request_subscription = os.environ.get("REQUEST_SUBSCRIPTION", "agent.requests")
@@ -146,18 +139,14 @@ def main() -> None:
     subscriber = RabbitMQSubscriber(connection)
 
     # Initialize storage adapter
-    storage_dir = os.environ.get("STORAGE_DIR")
-    if not storage_dir:
-        raise ValueError("STORAGE_DIR environment variable is required")
+    storage_dir = os.environ["STORAGE_DIR"]
     storage_adapter: MemoryProtocol = LocalMemoryAdapter(base_dir=storage_dir)
 
     # Initialize LLM adapter based on type
     if llm_adapter_type == "claude_cli":
         llm_adapter: LLMProtocol = ClaudeCliAdapter()
     elif llm_adapter_type == "local":
-        model_name = os.environ.get("MODEL_NAME")
-        if not model_name:
-            raise ValueError("MODEL_NAME required when LLM_ADAPTER=local")
+        model_name = os.environ["MODEL_NAME"]
         device = os.environ.get("DEVICE", "mps")
         llm_adapter = LocalLLMAdapter(model_name=model_name, device=device)
     else:
@@ -169,8 +158,8 @@ def main() -> None:
     memory_service = MemoryService(storage=storage_adapter)
 
     # Build tool definitions and orchestrator
-    tools = _get_memory_tool_definitions()
-    phases, post_phases = _build_orchestrator_phases(
+    tools = get_memory_tool_definitions()
+    phases, post_phases = build_orchestrator_phases(
         prompt_adapter, tools, llm_adapter, memory_service
     )
     orchestrator = ReActOrchestrator(

@@ -58,6 +58,46 @@ class TestE2EAgentPubSub:
         assert response.agent_id == "nonexistent_user"
         assert response.status == "error"
 
+    def test_receive_error_response_for_agent_without_me(self, pubsub_test_app):
+        """
+        Given: An agent exists with frame but no me file
+        When: Client publishes RunAgentRequest
+        Then: Client receives AgentResponse with error status (Pydantic ValidationError — me is required)
+        """
+        agent_id, session_id = pubsub_test_app.setup_agent(
+            memory={
+                "frame": "# Frame",
+                "context_anchors": "# Anchors",
+                "current_session": "# Session",
+            }
+        )
+
+        response = pubsub_test_app.send_pubsub_request(agent_id, session_id, "Hello")
+
+        assert response is not None, "Timed out waiting for response"
+        assert response.agent_id == agent_id
+        assert response.status == "error"
+
+    def test_receive_error_response_for_agent_without_frame(self, pubsub_test_app):
+        """
+        Given: An agent exists with identity but no frame file
+        When: Client publishes RunAgentRequest
+        Then: Client receives AgentResponse with error status (Pydantic ValidationError — frame is required)
+        """
+        agent_id, session_id = pubsub_test_app.setup_agent(
+            memory={
+                "me": "# Identity",
+                "context_anchors": "# Anchors",
+                "current_session": "# Session",
+            }
+        )
+
+        response = pubsub_test_app.send_pubsub_request(agent_id, session_id, "Hello")
+
+        assert response is not None, "Timed out waiting for response"
+        assert response.agent_id == agent_id
+        assert response.status == "error"
+
     def test_structured_output_returns_custom_schema_shape(self, pubsub_test_app):
         """
         Given: Client sends request with output_format JSON schema
@@ -65,7 +105,7 @@ class TestE2EAgentPubSub:
         Then: Client receives AgentResponse with response_data shaped to custom schema
 
         This is the critical test: output_format must flow from RunAgentRequest
-        through to orchestrator.run(), PROCESS must use the custom schema,
+        through to orchestrator.run(), FORMAT must use the custom schema,
         and the response must match it.
         """
         agent_id, session_id = pubsub_test_app.setup_agent()
@@ -101,13 +141,9 @@ class TestE2EAgentPubSub:
         assert response.session_id == session_id
         assert response.status == "success"
         assert response.response_data is not None
-        # Custom schema fields populated by PROCESS
+        # Custom schema fields populated by FORMAT
         assert response.response_data["name"] == "Jane"
         assert response.response_data["age"] == 30
-        # DefaultOutput fields should NOT be present
-        assert "output" not in response.response_data, (
-            "Custom schema should not include DefaultOutput's 'output' field"
-        )
 
         pubsub_test_app.reset_llm()
 

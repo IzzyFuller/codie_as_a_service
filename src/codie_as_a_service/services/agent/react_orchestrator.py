@@ -45,16 +45,7 @@ class ReActOrchestrator:
         Returns output_format model (defaults to SessionContext) populated
         from the final context state.
         """
-        if output_format is None:
-            output_format = DefaultOutput
-
         identity = self._memory.get_identity_context(agent_id=agent_id)
-        if not identity.me:
-            raise ValueError(f"No assistant identity configured for agent '{agent_id}'")
-        if not identity.frame:
-            raise ValueError(f"No frame configured for agent '{agent_id}'")
-
-        is_custom_output = output_format is not DefaultOutput
 
         context = SessionContext(
             session_id=session_id,
@@ -66,7 +57,7 @@ class ReActOrchestrator:
                 f"Context Anchors: {identity.context_anchors or ''}\n"
                 f"Current Session: {identity.current_session or ''}"
             ),
-            output_schema=output_format if is_custom_output else None,
+            output_schema=output_format or DefaultOutput,
         )
 
         for iteration in range(self._max_outer_iterations):
@@ -81,6 +72,4 @@ class ReActOrchestrator:
         for post_phase in self._post_phases:
             post_phase.execute(context)
 
-        if is_custom_output:
-            return output_format.model_validate_json(context.response)
-        return DefaultOutput.model_validate(context.model_dump())
+        return context.output_schema.model_validate_json(context.response)

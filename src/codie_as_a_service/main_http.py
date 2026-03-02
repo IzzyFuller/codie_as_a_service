@@ -17,28 +17,21 @@ from codie_as_a_service.adapters.llm.claude_cli_adapter import ClaudeCliAdapter
 from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
 from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
+from codie_as_a_service.core.models import ToolDefinition
 from codie_as_a_service.core.protocols import (
     AuthProtocol,
     LLMProtocol,
     MemoryProtocol,
-    Phase,
     PromptProtocol,
 )
-from codie_as_a_service.core.models import ToolDefinition
-from codie_as_a_service.services.schema_utils import json_schema_to_model
-from codie_as_a_service.core.phase_models import (
-    ExtendedContext,
-    HydratedIdentity,
-    ProcessResult,
-    ValidationResult,
-)
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
-from codie_as_a_service.services.phases import (
-    LLMPhaseDefinition,
-    SynthesizePhaseDefinition,
-    TextLLMPhaseDefinition,
-)
 from codie_as_a_service.services.memory.memory_service import MemoryService
+from codie_as_a_service.services.schema_utils import json_schema_to_model
+from codie_as_a_service.services.wiring import (
+    build_orchestrator_phases,
+    get_mcp_tool_definitions,
+    get_memory_tool_definitions,
+)
 
 load_dotenv()
 logging.basicConfig(
@@ -82,10 +75,10 @@ def create_app(
     app = FastAPI(title="Deep Agent Service")
 
     if tools is None:
-        tools = _get_memory_tool_definitions()
+        tools = get_memory_tool_definitions()
 
     # Build orchestrator — each phase owns its execution
-    phases, post_phases = _build_orchestrator_phases(
+    phases, post_phases = build_orchestrator_phases(
         prompt_adapter, tools, llm_adapter, memory_service
     )
     orchestrator = ReActOrchestrator(
@@ -111,23 +104,15 @@ def create_app(
             output_model = (
                 json_schema_to_model(output_format) if output_format else None
             )
-            session_context = orchestrator.run(
+            result = orchestrator.run(
                 session_id=session_id,
                 agent_id=agent_id,
                 instruction=message,
                 output_format=output_model,
             )
 
-            # Emit structured response
-            if output_format:
-                response_payload = session_context.model_dump()
-            else:
-                response_payload = {
-                    "output": session_context.response,
-                    "session_id": session_context.session_id,
-                    "done": session_context.done,
-                }
-            yield f"event: response\ndata: {json.dumps(response_payload)}\n\n"
+            # Emit structured response — always model_dump()
+            yield f"event: response\ndata: {json.dumps(result.model_dump())}\n\n"
 
             # Emit done event
             yield f"event: done\ndata: {json.dumps({'usage': {'input_tokens': 0, 'output_tokens': 0}})}\n\n"
@@ -163,174 +148,6 @@ def create_app(
         )
 
     return app
-
-
-def _get_memory_tool_definitions() -> list[ToolDefinition]:
-    """Get the standard memory tool definitions."""
-    return [
-        ToolDefinition(
-            name="read_memory",
-            description="Read agent memory by key (e.g., 'current_session', 'context_anchors')",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "key": {
-                        "type": "string",
-                        "description": "Memory key to read",
-                    }
-                },
-                "required": ["key"],
-            },
-        ),
-        ToolDefinition(
-            name="write_memory",
-            description="Write content to agent memory",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "key": {
-                        "type": "string",
-                        "description": "Memory key to write",
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Content to write",
-                    },
-                },
-                "required": ["key", "content"],
-            },
-        ),
-        ToolDefinition(
-            name="list_memory_keys",
-            description="List all memory keys for the agent",
-            input_schema={
-                "type": "object",
-                "properties": {},
-            },
-        ),
-    ]
-
-
-def _get_mcp_tool_definitions() -> list[ToolDefinition]:
-    """Get tool definitions for cognitive-memory MCP tools."""
-    return [
-        ToolDefinition(
-            name="list_entities",
-            description="List entities in long-term memory, optionally filtered by prefix",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "filter_prefix": {
-                        "type": "string",
-                        "description": "Optional prefix filter (e.g., 'people/', 'projects/')",
-                        "default": "",
-                    }
-                },
-            },
-        ),
-        ToolDefinition(
-            name="read_entity",
-            description="Read entity from long-term memory by path",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "entity_path": {
-                        "type": "string",
-                        "description": "Full path to entity (e.g., 'people/john-doe', 'projects/mcp-servers')",
-                    }
-                },
-                "required": ["entity_path"],
-            },
-        ),
-        ToolDefinition(
-            name="write_entity",
-            description="Write entity to long-term memory",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "entity_path": {
-                        "type": "string",
-                        "description": "Full path to entity (e.g., 'people/john-doe', 'concepts/learning')",
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Content to write to entity",
-                    },
-                },
-                "required": ["entity_path", "content"],
-            },
-        ),
-        ToolDefinition(
-            name="add_session_note",
-            description="Add contextual note to current session",
-            input_schema={
-                "type": "object",
-                "properties": {
-                    "note_type": {
-                        "type": "string",
-                        "enum": ["context", "insight", "decision"],
-                        "description": "Type of session note to add",
-                    },
-                    "content": {
-                        "type": "string",
-                        "description": "Note content to append to current session",
-                    },
-                },
-                "required": ["note_type", "content"],
-            },
-        ),
-    ]
-
-
-def _build_orchestrator_phases(
-    prompt_adapter: PromptProtocol,
-    tools: list[ToolDefinition],
-    llm: LLMProtocol,
-    memory: MemoryService,
-) -> tuple[list[Phase], list[Phase]]:
-    """Build the standard orchestrator phase and post-phase definitions.
-
-    Returns:
-        Tuple of (loop_phases, post_phases). Loop phases run each iteration;
-        post_phases run once after the loop completes (done=true or max iterations).
-    """
-    phases: list[Phase] = [
-        TextLLMPhaseDefinition(
-            name="hydrate",
-            llm=llm,
-            system_prompt=prompt_adapter.get_prompt("orchestrator_hydrate"),
-            output_schema=HydratedIdentity,
-            skip_on_retry=True,
-        ),
-        TextLLMPhaseDefinition(
-            name="extend",
-            llm=llm,
-            system_prompt=prompt_adapter.get_prompt("orchestrator_extend"),
-            output_schema=ExtendedContext,
-            tools=tools,
-        ),
-        LLMPhaseDefinition(
-            name="process",
-            llm=llm,
-            system_prompt=prompt_adapter.get_prompt("orchestrator_process"),
-            tools=tools,
-            output_schema=ProcessResult,
-            max_new_tokens=16384,
-        ),
-        TextLLMPhaseDefinition(
-            name="validate",
-            llm=llm,
-            system_prompt=prompt_adapter.get_prompt("orchestrator_validate"),
-            output_schema=ValidationResult,
-        ),
-    ]
-    post_phases: list[Phase] = [
-        SynthesizePhaseDefinition(
-            name="synthesize",
-            memory=memory,
-        ),
-    ]
-    return phases, post_phases
 
 
 def main() -> None:
@@ -382,9 +199,9 @@ def main() -> None:
         logger.info(
             "MCP tools enabled: %s (memory: %s)", mcp_server_path, mcp_memory_path
         )
-        tools = _get_mcp_tool_definitions()
+        tools = get_mcp_tool_definitions()
     else:
-        tools = _get_memory_tool_definitions()
+        tools = get_memory_tool_definitions()
 
     # Create and run app
     app = create_app(

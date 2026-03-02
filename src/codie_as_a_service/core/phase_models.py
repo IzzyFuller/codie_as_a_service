@@ -1,9 +1,5 @@
 """Phase output models and orchestration config for the ReActOrchestrator."""
 
-from __future__ import annotations
-
-from typing import Any
-
 from pydantic import BaseModel, Field
 
 # =============================================================================
@@ -23,11 +19,11 @@ class SessionContext(BaseModel):
     conversation_history: list[str] = []
     response: str = ""
     done: bool = False
-    output_schema: Any = Field(default=None, exclude=True)
+    output_schema: type[BaseModel] = Field(exclude=True)
 
 
 # =============================================================================
-# Phase Output Base
+# Default Output
 # =============================================================================
 
 
@@ -76,48 +72,12 @@ class HydratedIdentity(PhaseOutputModel):
         return context
 
 
-class ExtendedContext(PhaseOutputModel):
-    """Output of EXTEND phase: plain-text enriched context."""
+class ProcessedText(PhaseOutputModel):
+    """Output of PROCESS phase: plain-text reasoning result."""
 
     text_output: str
 
     def to_session_context(self, context: SessionContext) -> SessionContext:
-        context.conversation_history.append(f"EXTEND: {self.model_dump_json()}")
-        return context
-
-
-class ProcessResult(PhaseOutputModel):
-    """Output of PROCESS phase: main reasoning result."""
-
-    output: str
-    tools_used: list[str]
-    rationale: str
-
-    def to_session_context(self, context: SessionContext) -> SessionContext:
-        context.response = self.output
-        context.conversation_history.append(f"PROCESS: {self.model_dump_json()}")
-        return context
-
-
-class _ValidationFields(BaseModel):
-    """Typed validation of VALIDATE phase JSON output."""
-
-    done: bool
-    rationale: str
-    feedback: str
-
-
-class ValidationResult(PhaseOutputModel):
-    """Output of VALIDATE phase: completion check.
-
-    VALIDATE runs as a TextLLMPhaseDefinition — it never sees
-    context.output_schema. The raw JSON text is parsed internally.
-    """
-
-    text_output: str
-
-    def to_session_context(self, context: SessionContext) -> SessionContext:
-        fields = _ValidationFields.model_validate_json(self.text_output)
-        context.done = fields.done
-        context.conversation_history.append(f"VALIDATE: {self.text_output}")
+        context.response = self.text_output
+        context.conversation_history.append(f"PROCESS: {self.text_output}")
         return context

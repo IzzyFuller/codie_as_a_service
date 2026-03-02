@@ -3,7 +3,6 @@
 import json
 import os
 import subprocess
-
 import tempfile
 import time
 import uuid
@@ -14,23 +13,22 @@ from unittest.mock import MagicMock, patch
 import pika
 import pytest
 from google.cloud import firestore
-
 from starlette.testclient import TestClient as StarletteTestClient
-
 from synapse.adapters.rabbitmq import RabbitMQPublisher, RabbitMQSubscriber
-from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
-from codie_as_a_service.adapters.messaging.models import RunAgentRequest, AgentResponse
-from codie_as_a_service.services.memory.memory_service import MemoryService
-from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
-from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
+
 from codie_as_a_service.adapters.llm.claude_cli_adapter import ClaudeCliAdapter
+from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
+from codie_as_a_service.adapters.messaging.models import AgentResponse, RunAgentRequest
+from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
+from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
+from codie_as_a_service.main_http import create_app as create_http_app
 from codie_as_a_service.main_pubsub import create_app
-from codie_as_a_service.main_http import (
-    create_app as create_http_app,
-    _get_memory_tool_definitions,
-    _build_orchestrator_phases,
-)
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
+from codie_as_a_service.services.memory.memory_service import MemoryService
+from codie_as_a_service.services.wiring import (
+    build_orchestrator_phases,
+    get_memory_tool_definitions,
+)
 
 # ============================================================================
 # Domain-Level Test Response Specs (Adapter-Agnostic)
@@ -309,8 +307,8 @@ def agent_app(
     Session-scoped to maintain RabbitMQ connection state.
     Uses dedicated pubsub_memory_service (not parameterized).
     """
-    tools = _get_memory_tool_definitions()
-    phases, post_phases = _build_orchestrator_phases(
+    tools = get_memory_tool_definitions()
+    phases, post_phases = build_orchestrator_phases(
         file_prompt_adapter, tools, pubsub_llm_adapter, pubsub_memory_service
     )
     orchestrator = ReActOrchestrator(
@@ -432,9 +430,6 @@ def file_prompt_adapter():
     temp_dir = tempfile.mkdtemp(prefix="test_prompts_")
     prompts_path = Path(temp_dir)
 
-    # Define test prompts - using variables that ReActAgent actually passes
-    # (me, context_anchors, current_session)
-    # Orchestrator phase prompts use {{}} for JSON examples (escaped for .format())
     test_prompts = {
         "codie_as_a_service_system.txt": (
             "You are a helpful AI assistant with access to agent memory. "
@@ -442,18 +437,14 @@ def file_prompt_adapter():
             "You can read and write to the user's memory using the provided tools."
         ),
         "orchestrator_hydrate.txt": (
-            "You are an identity hydration agent. Return JSON with summary, key_patterns, session_state."
-        ),
-        "orchestrator_extend.txt": (
-            "You are an instruction extension agent. Return JSON with instruction, tool_manifest, rationale, memory_references."
+            "You are an identity hydration agent. Summarize the identity context."
         ),
         "orchestrator_process.txt": (
             "You are a processing agent. Execute the instruction using available tools. "
-            "Return JSON with output, tools_used, rationale."
+            "Return your response as plain text."
         ),
-        "orchestrator_validate.txt": (
-            "You are a validation agent. Assess if the processing result addresses the instruction. "
-            "Return JSON with done, rationale, feedback."
+        "orchestrator_format.txt": (
+            "You are a formatting agent. Format the response into the required JSON schema."
         ),
     }
 
@@ -613,14 +604,10 @@ class TestApp:
         "hydrate": LLMResponseSpec(
             content="Test identity summary for orchestrator testing.",
         ),
-        "extend": LLMResponseSpec(
-            content="Extended context for processing.",
-        ),
-        "validate_pass": LLMResponseSpec(
-            content='{"done": true, "rationale": "Request completed", "feedback": ""}',
-        ),
-        "validate_fail": LLMResponseSpec(
-            content='{"done": false, "rationale": "Needs more work", "feedback": "Incomplete"}',
+        "format": LLMResponseSpec(
+            content=json.dumps(
+                {"response": "default response", "session_id": "", "done": True}
+            ),
         ),
     }
 
@@ -673,108 +660,66 @@ class TestApp:
 
         return agent_id, session_id
 
-    def stub_llm_responses(
-        self, *responses: LLMResponseSpec, iterations: int = 1
-    ) -> None:
+    def stub_llm_responses(self, *responses: LLMResponseSpec) -> None:
         """
         Configure LLM to return these responses in sequence.
 
         Thin delegate to stub_phases() for backward compatibility.
-        All responses are mapped to the PROCESS phase tool loop.
-
-        Args:
-            responses: Domain-level response specs mapped to PROCESS phase.
-            iterations: Number of orchestrator iterations.
+        All responses are mapped to the PROCESS phase.
         """
-        self.stub_phases(process=list(responses), iterations=iterations)
-
-    def _build_phase(self, schema_response: LLMResponseSpec) -> list[LLMResponseSpec]:
-        """Build responses for any phase.
-
-        In the new architecture, each phase is exactly 1 adapter.call().
-        The adapter handles tool execution internally — the orchestrator
-        just sees the final schema-constrained result.
-        """
-        return [schema_response]
+        self.stub_phases(process=list(responses))
 
     def stub_phases(
         self,
         *,
         hydrate: list[LLMResponseSpec] | None = None,
-        extend: list[LLMResponseSpec] | None = None,
         process: list[LLMResponseSpec] | None = None,
-        validate: list[LLMResponseSpec] | None = None,
-        iterations: int = 1,
+        format_: list[LLMResponseSpec] | None = None,
         output_format: dict | None = None,
     ) -> None:
         """
         Configure LLM mock with per-phase response sequences.
 
-        SYNTHESIZE is deterministic (no LLM call). HYDRATE has
-        skip_on_retry=True, so only runs on iteration 0.
-
-        Iteration 0: HYDRATE + EXTEND + PROCESS + VALIDATE = 4 LLM calls
-        Iteration 1+: EXTEND + PROCESS + VALIDATE = 3 LLM calls
+        Pipeline: HYDRATE (text) + PROCESS (text) + FORMAT (structured) = 3 LLM calls.
+        SYNTHESIZE is deterministic (no LLM call). HYDRATE has skip_on_retry=True.
+        FORMAT sets context.done = True — single pass, no retry loop.
 
         Args:
-            hydrate: Custom HYDRATE phase response (1 schema call)
-            extend: Custom EXTEND phase response (1 schema call)
-            process: Custom PROCESS phase response (1 schema call; adapter handles tools)
-            validate: Custom VALIDATE phase response (1 schema call)
-            iterations: Number of orchestrator iterations (last validates pass)
-            output_format: When set, PROCESS uses raw content (caller's schema format)
+            hydrate: Custom HYDRATE phase response (plain text)
+            process: Custom PROCESS phase response (plain text)
+            format_: Custom FORMAT phase response (JSON matching output schema)
+            output_format: When set, FORMAT default uses raw content (caller's schema)
         """
-        # Derive content-dependent defaults from process responses
+        # Derive FORMAT default from process content + output_format
         last_content = ""
         if process:
             last_content = process[-1].content or ""
 
-        if output_format:
+        if format_ is not None:
+            format_response = format_[0]
+        elif output_format:
             # Custom output schema — process content is already in target format
-            process_schema = LLMResponseSpec(
-                content=last_content,
-            )
+            format_response = LLMResponseSpec(content=last_content)
         else:
-            process_schema = LLMResponseSpec(
+            # DefaultOutput schema
+            format_response = LLMResponseSpec(
                 content=json.dumps(
-                    {"output": last_content, "tools_used": [], "rationale": ""}
+                    {"response": last_content, "session_id": "", "done": True}
                 ),
             )
 
+        process_response = LLMResponseSpec(content=last_content)
+
         full_sequence: list[LLMResponseSpec] = []
-        for i in range(iterations):
-            is_last = i == iterations - 1
 
-            # HYDRATE — only on iteration 0 (skip_on_retry=True)
-            if i == 0:
-                full_sequence.extend(
-                    self._build_phase(
-                        hydrate[0] if hydrate else self._PHASE_DEFAULTS["hydrate"]
-                    )
-                )
+        # HYDRATE — plain text
+        full_sequence.append(hydrate[0] if hydrate else self._PHASE_DEFAULTS["hydrate"])
 
-            # EXTEND — runs every iteration (context may change after retry)
-            full_sequence.extend(
-                self._build_phase(
-                    extend[0] if extend else self._PHASE_DEFAULTS["extend"]
-                )
-            )
+        # PROCESS — plain text
+        full_sequence.append(process_response)
 
-            # PROCESS — 1 call (adapter handles tools internally)
-            full_sequence.extend(self._build_phase(process_schema))
-
-            # VALIDATE — 1 call
-            # (SYNTHESIZE runs as post-phase after loop — no LLM call)
-            if validate:
-                full_sequence.extend(self._build_phase(validate[0]))
-            elif is_last:
-                full_sequence.extend(
-                    self._build_phase(self._PHASE_DEFAULTS["validate_pass"])
-                )
-            else:
-                full_sequence.extend(
-                    self._build_phase(self._PHASE_DEFAULTS["validate_fail"])
-                )
+        # FORMAT — JSON matching output schema
+        full_sequence.append(format_response)
 
         adapter_responses = [self._to_adapter_response(r) for r in full_sequence]
         self._set_mock_side_effect(adapter_responses)

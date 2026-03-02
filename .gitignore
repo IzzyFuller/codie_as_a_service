@@ -76,3 +76,4 @@ data/
 
 # Local model weights
 mlx_model/
+.env.save

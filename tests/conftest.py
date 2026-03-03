@@ -2,11 +2,12 @@
 
 import json
 import os
+import shutil
+import socket
 import subprocess
 import tempfile
 import time
 import uuid
-from dataclasses import dataclass
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -30,23 +31,6 @@ from codie_as_a_service.services.wiring import (
     get_memory_tool_definitions,
 )
 
-# ============================================================================
-# Domain-Level Test Response Specs (Adapter-Agnostic)
-# ============================================================================
-
-
-@dataclass
-class LLMResponseSpec:
-    """
-    Domain-level LLM response specification for tests.
-
-    Tests describe responses in domain terms. The TestApp converts
-    these to adapter-specific formats internally.
-    """
-
-    content: str | None = None
-
-
 # Test configuration
 PROJECT_ID = "test-project"
 RABBITMQ_PORT = 5672
@@ -56,6 +40,49 @@ REQUEST_SUBSCRIPTION = "agent.requests"
 RESPONSE_SUBSCRIPTION = "agent.responses"
 RESPONSE_TOPIC = "agent.responses"
 
+# Default identity memory — minimum viable agent
+DEFAULT_IDENTITY = {
+    "frame": "# Frame",
+    "me": "# Identity",
+    "context_anchors": "# Anchors",
+    "current_session": "# Session",
+}
+
+
+# ============================================================================
+# Helpers (not fixtures — plain functions tests can call)
+# ============================================================================
+
+
+def setup_agent_memory(
+    memory_service: MemoryService,
+    memory: dict[str, str] | None = None,
+) -> tuple[str, str]:
+    """Create a test agent with identity files in memory.
+
+    Args:
+        memory_service: Real MemoryService with LocalMemoryAdapter
+        memory: Optional dict of memory key -> content.
+               Defaults to minimal identity if not provided.
+
+    Returns:
+        Tuple of (agent_id, session_id)
+    """
+    agent_id = str(uuid.uuid4())
+    session_id = str(uuid.uuid4())
+
+    for key, content in (memory or DEFAULT_IDENTITY).items():
+        memory_service.write_memory(agent_id=agent_id, key=key, content=content)
+
+    return agent_id, session_id
+
+
+def get_llm_mock(llm_adapter) -> MagicMock:
+    """Return the adapter-specific mock for the LLM's internal method."""
+    if isinstance(llm_adapter, ClaudeCliAdapter):
+        return llm_adapter._run_claude
+    return llm_adapter._generate
+
 
 # ============================================================================
 # Google Cloud Emulator Fixtures (Real Infrastructure for Tests)
@@ -64,8 +91,6 @@ RESPONSE_TOPIC = "agent.responses"
 
 def _port_is_reachable(host: str, port: int) -> bool:
     """Check if a TCP port is accepting connections."""
-    import socket
-
     try:
         with socket.create_connection((host, port), timeout=2):
             return True
@@ -255,7 +280,7 @@ def create_local_llm_adapter():
 def create_claude_cli_adapter():
     """Create ClaudeCliAdapter with mocked _run_claude method."""
     adapter = ClaudeCliAdapter()
-    # Mock _run_claude - will be configured by TestApp.stub_llm_responses
+    # Mock _run_claude - will be configured per-test via get_llm_mock()
     # Default must be valid DefaultOutput JSON so FORMAT phase can parse it
     adapter._run_claude = MagicMock(
         return_value=json.dumps(
@@ -306,6 +331,7 @@ def agent_app(
     pubsub_memory_service,
     pubsub_llm_adapter,
     file_prompt_adapter,
+    rabbitmq_connection,
     rabbitmq_publisher,
     rabbitmq_subscriber,
     rabbitmq_infrastructure,
@@ -314,7 +340,14 @@ def agent_app(
 
     Session-scoped to maintain RabbitMQ connection state.
     Uses dedicated pubsub_memory_service (not parameterized).
+    Purges request queue to avoid stale messages from previous test sessions.
     """
+    # Purge stale requests from previous sessions (rabbitmq_infrastructure
+    # purges during setup, but stale messages can accumulate between sessions)
+    purge_channel = rabbitmq_connection.channel()
+    purge_channel.queue_purge(queue=REQUEST_SUBSCRIPTION)
+    purge_channel.close()
+
     tools = get_memory_tool_definitions()
     phases, post_phases = build_orchestrator_phases(
         phase_names=["hydrate", "process", "format"],
@@ -347,7 +380,7 @@ def agent_app(
 
 
 # ============================================================================
-# Test Client Fixture
+# Pubsub Test Client
 # ============================================================================
 
 
@@ -470,64 +503,55 @@ def file_prompt_adapter():
     yield adapter
 
     # Cleanup: remove temp directory after tests
-    import shutil
-
     shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 # ============================================================================
-# Test Data Fixtures
-# ============================================================================
-
-
-@pytest.fixture
-def test_agent_id() -> str:
-    """Provide consistent test user ID."""
-    return "test_user_123"
-
-
-@pytest.fixture
-def test_session_id() -> str:
-    """Provide consistent test session ID."""
-    return "test_session_456"
-
-
-@pytest.fixture
-def sample_memory_content() -> str:
-    """Provide sample memory content for testing."""
-    return """# Current Session Memory
-
-## Tasks Completed
-- Initial setup
-- Memory structure created
-
-## Current Focus
-- Testing memory isolation
-"""
-
-
-# ============================================================================
-# HTTP App Fixtures
+# Orchestrator & HTTP Fixtures
 # ============================================================================
 
 
 @pytest.fixture(scope="function")
+def orchestrator(memory_service, llm_adapter, file_prompt_adapter):
+    """Build a format-only orchestrator for HTTP E2E tests.
+
+    Uses only FORMAT phase (1 LLM call) + SYNTHESIZE post-phase.
+    Most tests only need to verify the HTTP flow, response shape,
+    and persistence — not multi-phase pipeline behavior.
+    """
+    tools = get_memory_tool_definitions()
+    phases, post_phases = build_orchestrator_phases(
+        phase_names=["format"],
+        prompt_adapter=file_prompt_adapter,
+        tools=tools,
+        llm=llm_adapter,
+        memory=memory_service,
+    )
+    return ReActOrchestrator(
+        memory=memory_service,
+        phases=phases,
+        post_phases=post_phases,
+    )
+
+
+@pytest.fixture(scope="function")
 def http_app(
+    orchestrator,
     memory_service,
     llm_adapter,
     file_prompt_adapter,
 ):
-    """Create FastAPI HTTP app for E2E tests.
+    """Create FastAPI HTTP app with injected orchestrator.
 
     Function-scoped to ensure test isolation with parameterized storage.
     """
-    app = create_http_app(
+    return create_http_app(
         memory_service=memory_service,
         llm_adapter=llm_adapter,
         prompt_adapter=file_prompt_adapter,
         prompt_names=["codie_as_a_service_system"],
+        orchestrator=orchestrator,
     )
-    return app
 
 
 class HTTPTestClient:
@@ -569,269 +593,38 @@ class HTTPTestClient:
         return events
 
 
-# ============================================================================
-# TestApp - Encapsulated Test Application (Adapter-Agnostic)
-# ============================================================================
-
-
-class TestApp:
-    """
-    Encapsulates the entire test application.
-
-    Tests interact ONLY through this class. Implementation details
-    (which adapter, how it's wired) are hidden. If we change adapters,
-    only this class needs to change - not the tests.
-    """
-
-    _response_counter = 0
-
-    _PHASE_DEFAULTS = {
-        "hydrate": LLMResponseSpec(
-            content="Test identity summary for orchestrator testing.",
-        ),
-        "format": LLMResponseSpec(
-            content=json.dumps(
-                {"response": "default response", "session_id": "", "done": True}
-            ),
-        ),
-    }
-
-    def __init__(
-        self,
-        memory_service,
-        llm_adapter,
-        http_client=None,
-        pubsub_client=None,
-    ):
-        self._memory_service = memory_service
-        self._llm_adapter = llm_adapter
-        self._http_client = http_client
-        self._pubsub_client = pubsub_client
-        self._is_claude_cli = isinstance(llm_adapter, ClaudeCliAdapter)
-        self._default_response = self._to_adapter_response(
-            LLMResponseSpec(content="I'm ready to help you.")
-        )
-
-    def setup_agent(
-        self,
-        memory: dict[str, str] | None = None,
-    ) -> tuple[str, str]:
-        """
-        Create a test user with given memory contents.
-
-        Args:
-            memory: Optional dict of memory key -> content.
-                   Defaults to minimal identity if not provided.
-
-        Returns:
-            Tuple of (agent_id, session_id)
-        """
-        agent_id = str(uuid.uuid4())
-        session_id = str(uuid.uuid4())
-
-        # Default minimal memory if not specified
-        if memory is None:
-            memory = {
-                "frame": "# Frame",
-                "me": "# Identity",
-                "context_anchors": "# Anchors",
-                "current_session": "# Session",
-            }
-
-        for key, content in memory.items():
-            self._memory_service.write_memory(
-                agent_id=agent_id, key=key, content=content
-            )
-
-        return agent_id, session_id
-
-    def stub_llm_responses(self, *responses: LLMResponseSpec) -> None:
-        """
-        Configure LLM to return these responses in sequence.
-
-        Thin delegate to stub_phases() for backward compatibility.
-        All responses are mapped to the PROCESS phase.
-        """
-        self.stub_phases(process=list(responses))
-
-    def stub_phases(
-        self,
-        *,
-        hydrate: list[LLMResponseSpec] | None = None,
-        process: list[LLMResponseSpec] | None = None,
-        format_: list[LLMResponseSpec] | None = None,
-        output_format: dict | None = None,
-    ) -> None:
-        """
-        Configure LLM mock with per-phase response sequences.
-
-        Pipeline: HYDRATE (text) + PROCESS (text) + FORMAT (structured) = 3 LLM calls.
-        SYNTHESIZE is deterministic (no LLM call). HYDRATE has skip_on_retry=True.
-        FORMAT sets context.done = True — single pass, no retry loop.
-
-        Args:
-            hydrate: Custom HYDRATE phase response (plain text)
-            process: Custom PROCESS phase response (plain text)
-            format_: Custom FORMAT phase response (JSON matching output schema)
-            output_format: When set, FORMAT default uses raw content (caller's schema)
-        """
-        # Derive FORMAT default from process content + output_format
-        last_content = ""
-        if process:
-            last_content = process[-1].content or ""
-
-        if format_ is not None:
-            format_response = format_[0]
-        elif output_format:
-            # Custom output schema — process content is already in target format
-            format_response = LLMResponseSpec(content=last_content)
-        else:
-            # DefaultOutput schema
-            format_response = LLMResponseSpec(
-                content=json.dumps(
-                    {"response": last_content, "session_id": "", "done": True}
-                ),
-            )
-
-        process_response = LLMResponseSpec(content=last_content)
-
-        full_sequence: list[LLMResponseSpec] = []
-
-        # HYDRATE — plain text
-        full_sequence.append(hydrate[0] if hydrate else self._PHASE_DEFAULTS["hydrate"])
-
-        # PROCESS — plain text
-        full_sequence.append(process_response)
-
-        # FORMAT — JSON matching output schema
-        full_sequence.append(format_response)
-
-        adapter_responses = [self._to_adapter_response(r) for r in full_sequence]
-        self._set_mock_side_effect(adapter_responses)
-
-    def _get_llm_mock(self) -> MagicMock:
-        """Return the adapter-specific mock (ClaudeCliAdapter or LocalLLMAdapter)."""
-        if self._is_claude_cli:
-            return self._llm_adapter._run_claude
-        return self._llm_adapter._generate
-
-    def _set_mock_side_effect(self, responses: list[str]) -> None:
-        """Set side_effect on the adapter-specific LLM mock."""
-        self._get_llm_mock().side_effect = responses
-
-    def reset_llm(self) -> None:
-        """Reset LLM mock to default state."""
-        mock = self._get_llm_mock()
-        mock.side_effect = None
-        mock.return_value = self._default_response
-
-    def chat(
-        self,
-        agent_id: str,
-        session_id: str | None = None,
-        message: str = "",
-        output_format: dict | None = None,
-    ) -> list[dict]:
-        """
-        Make a chat request and return SSE events.
-
-        Args:
-            agent_id: Agent identifier
-            session_id: Session identifier (generated by backend if omitted)
-            message: User message
-            output_format: Optional JSON schema for structured output
-
-        Returns:
-            List of SSE events as dicts with 'event' and 'data' keys
-        """
-        return self._http_client.chat(agent_id, session_id, message, output_format)
-
-    def health(self):
-        """GET /health endpoint."""
-        return self._http_client.health()
-
-    def read_memory(self, agent_id: str, key: str) -> str | None:
-        """Read agent memory (for verifying side effects)."""
-        return self._memory_service.read_memory(agent_id=agent_id, key=key)
-
-    def write_memory(self, agent_id: str, key: str, content: str) -> None:
-        """Write agent memory (for test setup)."""
-        self._memory_service.write_memory(agent_id=agent_id, key=key, content=content)
-
-    def send_pubsub_request(
-        self,
-        agent_id: str,
-        session_id: str,
-        message: str,
-        output_format: dict | None = None,
-        timeout_seconds: int = 10,
-    ) -> AgentResponse | None:
-        """
-        Send a Pub/Sub request and wait for response.
-
-        Args:
-            agent_id: Agent identifier
-            session_id: Session identifier
-            message: User message
-            output_format: Optional JSON schema for structured output
-            timeout_seconds: How long to wait for response
-
-        Returns:
-            AgentResponse or None if timeout
-        """
-        if self._pubsub_client is None:
-            raise RuntimeError("TestApp not configured for Pub/Sub tests")
-        return self._pubsub_client.send_request(
-            agent_id, session_id, message, output_format, timeout_seconds
-        )
-
-    def _to_adapter_response(self, spec: LLMResponseSpec) -> str:
-        """
-        Convert domain-level spec to text that the adapter will parse.
-
-        Both adapters return plain text from their mocked internal methods
-        (_generate for local, _run_claude for CLI). The call() method
-        handles parsing/validation.
-        """
-        return spec.content or ""
-
-
 @pytest.fixture(scope="function")
-def test_app(memory_service, llm_adapter, http_app) -> TestApp:
-    """
-    Provide the encapsulated test application for HTTP tests.
-
-    Function-scoped to ensure test isolation with parameterized storage.
-    This is the PRIMARY fixture HTTP tests should use. It hides all
-    implementation details about adapters and wiring.
-    """
-    http_client = HTTPTestClient(http_app)
-    return TestApp(
-        memory_service=memory_service,
-        llm_adapter=llm_adapter,
-        http_client=http_client,
-    )
-
-
-@pytest.fixture(scope="session")
-def pubsub_test_app(
-    pubsub_memory_service, pubsub_llm_adapter, agent_app, test_client
-) -> TestApp:
-    """
-    Provide the encapsulated test application for Pub/Sub tests.
-
-    Session-scoped to maintain RabbitMQ connection state.
-    Uses dedicated pubsub fixtures (not parameterized).
-    This is the PRIMARY fixture Pub/Sub tests should use.
-    """
-    return TestApp(
-        memory_service=pubsub_memory_service,
-        llm_adapter=pubsub_llm_adapter,
-        pubsub_client=test_client,
-    )
-
-
-@pytest.fixture(scope="function")
-def http_test_client(http_app):
+def http_client(http_app):
     """Provide an HTTP test client for E2E tests."""
     return HTTPTestClient(http_app)
+
+
+# ============================================================================
+# Test Data Fixtures
+# ============================================================================
+
+
+@pytest.fixture
+def test_agent_id() -> str:
+    """Provide consistent test user ID."""
+    return "test_user_123"
+
+
+@pytest.fixture
+def test_session_id() -> str:
+    """Provide consistent test session ID."""
+    return "test_session_456"
+
+
+@pytest.fixture
+def sample_memory_content() -> str:
+    """Provide sample memory content for testing."""
+    return """# Current Session Memory
+
+## Tasks Completed
+- Initial setup
+- Memory structure created
+
+## Current Focus
+- Testing memory isolation
+"""

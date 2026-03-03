@@ -54,6 +54,7 @@ def create_app(
     prompt_adapter: PromptProtocol,
     prompt_names: list[str],
     tools: list[ToolDefinition] | None = None,
+    orchestrator: ReActOrchestrator | None = None,
 ) -> FastAPI:
     """
     Create FastAPI app with chat endpoint.
@@ -64,28 +65,30 @@ def create_app(
         prompt_adapter: File-based prompt adapter
         prompt_names: List of prompt names to fetch and combine for system prompt
         tools: Optional custom tool definitions (default: memory tools only)
+        orchestrator: Optional pre-built orchestrator (tests inject custom pipelines)
 
     Returns:
         Configured FastAPI application
     """
     app = FastAPI(title="Deep Agent Service")
 
-    if tools is None:
-        tools = get_memory_tool_definitions()
+    if orchestrator is None:
+        if tools is None:
+            tools = get_memory_tool_definitions()
 
-    # Build orchestrator — each phase owns its execution
-    phases, post_phases = build_orchestrator_phases(
-        phase_names=["hydrate", "process", "format"],
-        prompt_adapter=prompt_adapter,
-        tools=tools,
-        llm=llm_adapter,
-        memory=memory_service,
-    )
-    orchestrator = ReActOrchestrator(
-        memory=memory_service,
-        phases=phases,
-        post_phases=post_phases,
-    )
+        # Build orchestrator — each phase owns its execution
+        phases, post_phases = build_orchestrator_phases(
+            phase_names=["hydrate", "process", "format"],
+            prompt_adapter=prompt_adapter,
+            tools=tools,
+            llm=llm_adapter,
+            memory=memory_service,
+        )
+        orchestrator = ReActOrchestrator(
+            memory=memory_service,
+            phases=phases,
+            post_phases=post_phases,
+        )
 
     def generate_sse_events(
         agent_id: str,

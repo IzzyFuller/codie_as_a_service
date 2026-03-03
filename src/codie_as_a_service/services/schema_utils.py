@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import create_model
 
-from codie_as_a_service.core.phase_models import PhaseOutputModel, SessionContext
+from codie_as_a_service.core.phase_models import PhaseOutputModel
 
 # JSON Schema type → Python type mapping
 _TYPE_MAP: dict[str, type] = {
@@ -20,14 +20,11 @@ _TYPE_MAP: dict[str, type] = {
 class _DynamicPhaseOutput(PhaseOutputModel):
     """Base for dynamically-created output models.
 
-    Default to_session_context stores the full model as JSON in context.response.
-    Callers using the SDK can override this with domain-specific logic.
+    Used by FormatPhaseDefinition when client provides output_format.
+    FORMAT handles context mutation directly — no to_session_context needed.
     """
 
-    def to_session_context(self, context: SessionContext) -> SessionContext:
-        context.response = self.model_dump_json()
-        context.conversation_history.append(f"PROCESS: {self.model_dump_json()}")
-        return context
+    pass
 
 
 def json_schema_to_model(schema: dict[str, Any]) -> type[_DynamicPhaseOutput]:

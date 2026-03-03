@@ -10,44 +10,6 @@ from codie_as_a_service.services.memory.memory_service import MemoryService
 logger = logging.getLogger(__name__)
 
 
-class LLMPhaseDefinition:
-    """Phase backed by an LLM call with structured JSON output."""
-
-    def __init__(
-        self,
-        name: str,
-        llm: LLMProtocol,
-        system_prompt: str,
-        output_schema: type[PhaseOutputModel],
-        tools: list[ToolDefinition] = [],
-        max_new_tokens: int | None = None,
-    ) -> None:
-        self.name = name
-        self._llm = llm
-        self._system_prompt = system_prompt
-        self._output_schema = output_schema
-        self._tools = tools
-        self._max_new_tokens = max_new_tokens
-
-    def execute(self, context: SessionContext) -> None:
-        """Call LLM, validate response, apply to context."""
-        logger.info("Phase %s starting (iteration %d)", self.name, context.iteration)
-        schema = context.output_schema or self._output_schema
-        result = self._llm.call(
-            messages=[
-                Message(
-                    role="user",
-                    content=f"{context.instruction}{context.response}{context.conversation_history}",
-                )
-            ],
-            system_prompt=f"{context.identity_summary}{self._system_prompt}",
-            tools=self._tools,
-            output_model=schema,
-            max_new_tokens=self._max_new_tokens,
-        )
-        result.to_session_context(context)
-
-
 class TextLLMPhaseDefinition:
     """Phase backed by an LLM call that returns plain text."""
 

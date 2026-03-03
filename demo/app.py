@@ -13,7 +13,6 @@ import httpx
 
 # Configuration
 API_BASE_URL = os.environ.get("DEEP_AGENT_API_URL", "http://localhost:8080")
-API_KEY = os.environ.get("API_KEY", "")
 DEFAULT_AGENT_ID = os.environ.get("DEMO_AGENT_ID", "demo-user")
 LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "300"))
 
@@ -48,11 +47,9 @@ def chat(message: str, history: list[dict], agent_id: str, session_state: dict):
         payload["session_id"] = session_state["session_id"]
 
     with httpx.Client(timeout=float(LLM_TIMEOUT)) as client:
-        headers = {"X-API-Key": API_KEY} if API_KEY else {}
         with client.stream(
             "POST",
             f"{API_BASE_URL}/chat",
-            headers=headers,
             json=payload,
         ) as response:
             response.raise_for_status()

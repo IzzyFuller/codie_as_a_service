@@ -132,40 +132,60 @@ def get_mcp_tool_definitions() -> list[ToolDefinition]:
 
 
 def build_orchestrator_phases(
+    phase_names: list[str],
     prompt_adapter: PromptProtocol,
     tools: list[ToolDefinition],
     llm: LLMProtocol,
     memory: MemoryService,
 ) -> tuple[list[Phase], list[Phase]]:
-    """Build the standard orchestrator phase and post-phase definitions.
+    """Build orchestrator phases filtered by phase_names list.
 
     Pipeline: HYDRATE → PROCESS (text) → FORMAT (structured) → SYNTHESIZE (post-phase)
+
+    Args:
+        phase_names: List of phase names to include (e.g., ["hydrate", "process", "format"])
+        prompt_adapter: Prompt adapter for fetching system prompts
+        tools: Tool definitions to provide to phases
+        llm: LLM adapter for phase execution
+        memory: Memory service for persistence
 
     Returns:
         Tuple of (loop_phases, post_phases). Loop phases run each iteration;
         post_phases run once after the loop completes (done=true or max iterations).
     """
-    phases: list[Phase] = [
-        TextLLMPhaseDefinition(
-            name="hydrate",
-            llm=llm,
-            system_prompt=prompt_adapter.get_prompt("orchestrator_hydrate"),
-            output_schema=HydratedIdentity,
-            skip_on_retry=True,
-        ),
-        TextLLMPhaseDefinition(
-            name="process",
-            llm=llm,
-            system_prompt=prompt_adapter.get_prompt("orchestrator_process"),
-            output_schema=ProcessedText,
-            tools=tools,
-        ),
-        FormatPhaseDefinition(
-            name="format",
-            llm=llm,
-            system_prompt=prompt_adapter.get_prompt("orchestrator_format"),
-        ),
-    ]
+    phases: list[Phase] = []
+
+    if "hydrate" in phase_names:
+        phases.append(
+            TextLLMPhaseDefinition(
+                name="hydrate",
+                llm=llm,
+                system_prompt=prompt_adapter.get_prompt("orchestrator_hydrate"),
+                output_schema=HydratedIdentity,
+                skip_on_retry=True,
+            )
+        )
+
+    if "process" in phase_names:
+        phases.append(
+            TextLLMPhaseDefinition(
+                name="process",
+                llm=llm,
+                system_prompt=prompt_adapter.get_prompt("orchestrator_process"),
+                output_schema=ProcessedText,
+                tools=tools,
+            )
+        )
+
+    if "format" in phase_names:
+        phases.append(
+            FormatPhaseDefinition(
+                name="format",
+                llm=llm,
+                system_prompt=prompt_adapter.get_prompt("orchestrator_format"),
+            )
+        )
+
     post_phases: list[Phase] = [
         SynthesizePhaseDefinition(
             name="synthesize",

@@ -103,23 +103,6 @@ class PromptProtocol(Protocol):
 
 
 @runtime_checkable
-class AuthProtocol(Protocol):
-    """Abstract interface for authentication."""
-
-    def verify(self, credentials: str) -> bool:
-        """
-        Verify credentials.
-
-        Args:
-            credentials: The credentials to verify (e.g., API key)
-
-        Returns:
-            True if valid, False otherwise
-        """
-        ...
-
-
-@runtime_checkable
 class Phase(Protocol):
     """Abstract interface for an orchestration phase.
 

@@ -10,6 +10,7 @@ Tests use TestApp which encapsulates all implementation details.
 If we change LLM adapters, only TestApp needs to change - not these tests.
 """
 
+import json
 import time
 
 import pytest
@@ -109,8 +110,6 @@ class TestE2EAgentPubSub:
         and the response must match it.
         """
         agent_id, session_id = pubsub_test_app.setup_agent()
-
-        import json
 
         output_schema = {
             "type": "object",

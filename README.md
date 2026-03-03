@@ -42,7 +42,6 @@ Test it:
 ```bash
 curl -X POST http://localhost:8080/chat \
   -H "Content-Type: application/json" \
-  -H "X-API-Key: local-dev-key" \
   -d '{"agent_id": "myagent", "session_id": "1", "message": "Hello!"}' \
   --no-buffer
 ```
@@ -86,7 +85,6 @@ STORAGE_DIR=./data/agents \
 | `DEVICE` | `mps` | `mps`, `cuda`, or `cpu` (when `local`) |
 | `PROMPTS_DIR` | `./prompts` | Directory containing prompt files |
 | `PROMPT_NAMES` | — | Comma-separated prompt file names |
-| `API_KEY` | — | HTTP endpoint auth key |
 | `HTTP_HOST` | `0.0.0.0` | HTTP bind address |
 | `HTTP_PORT` | `8080` | HTTP port |
 | `BROKER_URL` | `amqp://guest:guest@localhost:5672/` | RabbitMQ connection URL |
@@ -112,7 +110,7 @@ Each agent needs a directory with at least these files:
 
 ## HTTP API
 
-**`POST /chat`** — Streaming chat (requires `X-API-Key` header)
+**`POST /chat`** — Streaming chat
 
 ```json
 {
@@ -127,7 +125,7 @@ Returns SSE stream:
 - `event: done` — `{"usage": {...}}`
 - `event: error` — `{"message": "..."}`
 
-**`GET /health`** — Health check (no auth required)
+**`GET /health`** — Health check
 
 ## Project Structure
 
@@ -139,7 +137,6 @@ src/codie_as_a_service/
 │   ├── memory/            # MemoryService (read/write/list)
 │   └── phases/            # LLMPhaseDefinition, TextLLMPhaseDefinition, SynthesizePhaseDefinition
 ├── adapters/
-│   ├── auth/              # API key authentication
 │   ├── llm/               # Claude CLI adapter, Local MLX adapter
 │   ├── prompts/           # File-based prompt loading
 │   ├── storage/           # Local filesystem storage

@@ -55,8 +55,6 @@ FIRESTORE_EMULATOR_PORT = 8086
 REQUEST_SUBSCRIPTION = "agent.requests"
 RESPONSE_SUBSCRIPTION = "agent.responses"
 RESPONSE_TOPIC = "agent.responses"
-# Test API key for auth
-TEST_API_KEY = "test-secret-key-12345"
 
 
 # ============================================================================
@@ -244,7 +242,12 @@ def create_local_llm_adapter():
         adapter = LocalLLMAdapter(model_name="test-model")
 
     # Mock _generate directly - bypasses mlx_lm.generate
-    adapter._generate = MagicMock(return_value="I'm ready to help you.")
+    # Default must be valid DefaultOutput JSON so FORMAT phase can parse it
+    adapter._generate = MagicMock(
+        return_value=json.dumps(
+            {"response": "I'm ready to help you.", "session_id": "", "done": True}
+        )
+    )
 
     return adapter
 
@@ -253,7 +256,12 @@ def create_claude_cli_adapter():
     """Create ClaudeCliAdapter with mocked _run_claude method."""
     adapter = ClaudeCliAdapter()
     # Mock _run_claude - will be configured by TestApp.stub_llm_responses
-    adapter._run_claude = MagicMock(return_value="I'm ready to help you.")
+    # Default must be valid DefaultOutput JSON so FORMAT phase can parse it
+    adapter._run_claude = MagicMock(
+        return_value=json.dumps(
+            {"response": "I'm ready to help you.", "session_id": "", "done": True}
+        )
+    )
     return adapter
 
 
@@ -309,7 +317,11 @@ def agent_app(
     """
     tools = get_memory_tool_definitions()
     phases, post_phases = build_orchestrator_phases(
-        file_prompt_adapter, tools, pubsub_llm_adapter, pubsub_memory_service
+        phase_names=["hydrate", "process", "format"],
+        prompt_adapter=file_prompt_adapter,
+        tools=tools,
+        llm=pubsub_llm_adapter,
+        memory=pubsub_memory_service,
     )
     orchestrator = ReActOrchestrator(
         memory=pubsub_memory_service,
@@ -504,7 +516,6 @@ def http_app(
     memory_service,
     llm_adapter,
     file_prompt_adapter,
-    api_key_auth_adapter,
 ):
     """Create FastAPI HTTP app for E2E tests.
 
@@ -515,48 +526,19 @@ def http_app(
         llm_adapter=llm_adapter,
         prompt_adapter=file_prompt_adapter,
         prompt_names=["codie_as_a_service_system"],
-        auth=api_key_auth_adapter,
     )
     return app
-
-
-@pytest.fixture(scope="session")
-def api_key_auth_adapter():
-    """Create API key auth adapter for tests."""
-    from codie_as_a_service.adapters.auth.api_key_adapter import APIKeyAuthAdapter
-
-    return APIKeyAuthAdapter(valid_key=TEST_API_KEY)
 
 
 class HTTPTestClient:
     """Client for HTTP E2E tests - simulates external client interacting with the system."""
 
-    def __init__(self, app, api_key: str):
+    def __init__(self, app):
         self._client = StarletteTestClient(app)
-        self._api_key = api_key
 
     def health(self):
-        """GET /health endpoint (no auth required)."""
+        """GET /health endpoint."""
         return self._client.get("/health")
-
-    def chat_raw(
-        self,
-        agent_id: str,
-        session_id: str | None,
-        message: str,
-        api_key: str | None,
-        output_format: dict | None = None,
-    ):
-        """POST to /chat and return raw response (for testing auth)."""
-        payload: dict = {"agent_id": agent_id, "message": message}
-        if session_id is not None:
-            payload["session_id"] = session_id
-        if output_format:
-            payload["output_format"] = output_format
-        headers = {}
-        if api_key is not None:
-            headers["X-API-Key"] = api_key
-        return self._client.post("/chat", json=payload, headers=headers)
 
     def chat(
         self,
@@ -565,10 +547,13 @@ class HTTPTestClient:
         message: str = "",
         output_format: dict | None = None,
     ) -> list[dict]:
-        """POST to /chat and collect SSE events (uses configured API key)."""
-        response = self.chat_raw(
-            agent_id, session_id, message, self._api_key, output_format
-        )
+        """POST to /chat and collect SSE events."""
+        payload: dict = {"agent_id": agent_id, "message": message}
+        if session_id is not None:
+            payload["session_id"] = session_id
+        if output_format:
+            payload["output_format"] = output_format
+        response = self._client.post("/chat", json=payload)
 
         # Parse SSE response
         events = []
@@ -761,19 +746,6 @@ class TestApp:
         """
         return self._http_client.chat(agent_id, session_id, message, output_format)
 
-    def chat_raw(
-        self,
-        agent_id: str,
-        session_id: str | None,
-        message: str,
-        api_key: str | None,
-        output_format: dict | None = None,
-    ):
-        """Make a chat request and return raw response (for auth testing)."""
-        return self._http_client.chat_raw(
-            agent_id, session_id, message, api_key, output_format
-        )
-
     def health(self):
         """GET /health endpoint."""
         return self._http_client.health()
@@ -833,7 +805,7 @@ def test_app(memory_service, llm_adapter, http_app) -> TestApp:
     This is the PRIMARY fixture HTTP tests should use. It hides all
     implementation details about adapters and wiring.
     """
-    http_client = HTTPTestClient(http_app, api_key=TEST_API_KEY)
+    http_client = HTTPTestClient(http_app)
     return TestApp(
         memory_service=memory_service,
         llm_adapter=llm_adapter,

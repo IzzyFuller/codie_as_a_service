@@ -278,44 +278,6 @@ class TestE2EHTTPChat:
 
         test_app.reset_llm()
 
-    def test_health_endpoint_does_not_require_auth(self, test_app):
-        """
-        Given: No authentication header
-        When: Client GETs /health
-        Then: Client receives 200 OK
-        """
-        response = test_app.health()
-        assert response.status_code == 200
-        assert response.json() == {"status": "ok"}
-
-    def test_chat_returns_401_without_auth_header(self, test_app):
-        """
-        Given: No authentication header
-        When: Client POSTs to /chat
-        Then: Client receives 401 Unauthorized
-        """
-        response = test_app.chat_raw(
-            agent_id="any",
-            session_id="any",
-            message="hello",
-            api_key=None,
-        )
-        assert response.status_code == 401
-
-    def test_chat_returns_401_with_invalid_api_key(self, test_app):
-        """
-        Given: Invalid API key in header
-        When: Client POSTs to /chat
-        Then: Client receives 401 Unauthorized
-        """
-        response = test_app.chat_raw(
-            agent_id="any",
-            session_id="any",
-            message="hello",
-            api_key="wrong-key",
-        )
-        assert response.status_code == 401
-
     def test_stub_phases_simple_end_turn(self, test_app):
         """
         Given: stub_phases configures per-phase responses directly

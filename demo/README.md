@@ -61,9 +61,6 @@ Create a `.env` file in the repo root (see `.env.example`):
 # Required - Storage
 STORAGE_DIR=./data/agents
 
-# Required - Authentication
-API_KEY=your-secret-api-key
-
 # Required - Prompt configuration
 PROMPTS_DIR=./prompts
 PROMPT_NAMES=codie_as_a_service_system
@@ -78,7 +75,6 @@ HTTP_PORT=8080
 - **Streaming responses**: Watch the agent think in real-time
 - **Per-user memory**: Each agent_id gets isolated memory storage
 - **Session persistence**: Memory persists across conversations for the same user
-- **API key authentication**: HTTP endpoint protected by X-API-Key header
 
 ## Testing Memory Persistence
 
@@ -110,7 +106,7 @@ User Browser (localhost:7860)
        │
        ▼
    Gradio UI (demo/app.py)
-       │ HTTP POST /chat (X-API-Key header)
+       │ HTTP POST /chat
        ▼
    HTTP Service (main_http.py:8080)
        │

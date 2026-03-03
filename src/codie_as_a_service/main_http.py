@@ -8,18 +8,16 @@ from typing import Any, Generator
 
 import uvicorn
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import FastAPI
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
-from codie_as_a_service.adapters.auth.api_key_adapter import APIKeyAuthAdapter
 from codie_as_a_service.adapters.llm.claude_cli_adapter import ClaudeCliAdapter
 from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
 from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
 from codie_as_a_service.core.models import ToolDefinition
 from codie_as_a_service.core.protocols import (
-    AuthProtocol,
     LLMProtocol,
     MemoryProtocol,
     PromptProtocol,
@@ -55,7 +53,6 @@ def create_app(
     llm_adapter: LLMProtocol,
     prompt_adapter: PromptProtocol,
     prompt_names: list[str],
-    auth: AuthProtocol,
     tools: list[ToolDefinition] | None = None,
 ) -> FastAPI:
     """
@@ -66,7 +63,6 @@ def create_app(
         llm_adapter: LLM adapter (handles tool execution internally)
         prompt_adapter: File-based prompt adapter
         prompt_names: List of prompt names to fetch and combine for system prompt
-        auth: Authentication adapter for verifying requests
         tools: Optional custom tool definitions (default: memory tools only)
 
     Returns:
@@ -79,18 +75,17 @@ def create_app(
 
     # Build orchestrator — each phase owns its execution
     phases, post_phases = build_orchestrator_phases(
-        prompt_adapter, tools, llm_adapter, memory_service
+        phase_names=["hydrate", "process", "format"],
+        prompt_adapter=prompt_adapter,
+        tools=tools,
+        llm=llm_adapter,
+        memory=memory_service,
     )
     orchestrator = ReActOrchestrator(
         memory=memory_service,
         phases=phases,
         post_phases=post_phases,
     )
-
-    def verify_api_key(x_api_key: str | None = Header(None)) -> None:
-        """FastAPI dependency to verify API key."""
-        if x_api_key is None or not auth.verify(x_api_key):
-            raise HTTPException(status_code=401, detail="Invalid or missing API key")
 
     def generate_sse_events(
         agent_id: str,
@@ -126,7 +121,7 @@ def create_app(
         """Health check endpoint."""
         return {"status": "ok"}
 
-    @app.post("/chat", dependencies=[Depends(verify_api_key)])
+    @app.post("/chat")
     async def chat(request: ChatRequest) -> StreamingResponse:
         """
         Process chat message and return streaming response.
@@ -163,8 +158,6 @@ def main() -> None:
 
     prompt_names = [name.strip() for name in os.environ["PROMPT_NAMES"].split(",")]
 
-    api_key = os.environ.get("API_KEY")
-
     # Initialize storage adapter
     storage_adapter: MemoryProtocol = LocalMemoryAdapter(
         base_dir=os.environ.get("STORAGE_DIR"),
@@ -186,9 +179,6 @@ def main() -> None:
     # Build memory service
     memory_service = MemoryService(storage=storage_adapter)
 
-    # Initialize auth adapter
-    auth_adapter = APIKeyAuthAdapter(valid_key=api_key)
-
     # Determine tool definitions
     # When MCP is configured, cognitive-memory tools replace memory tools
     # Tool execution is handled by the adapter (Claude Code natively, local via internal loop)
@@ -209,7 +199,6 @@ def main() -> None:
         llm_adapter=llm_adapter,
         prompt_adapter=prompt_adapter,
         prompt_names=prompt_names,
-        auth=auth_adapter,
         tools=tools,
     )
 

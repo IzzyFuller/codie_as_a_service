@@ -30,8 +30,6 @@ export HTTP_HOST=${HTTP_HOST:-0.0.0.0}
 export HTTP_PORT=${HTTP_PORT:-8080}
 export PROMPTS_DIR=${PROMPTS_DIR:-./prompts}
 export PROMPT_NAMES=${PROMPT_NAMES:-codie_as_a_service_system}
-export API_KEY=${API_KEY:-local-dev-key}
-
 # Create storage directory if needed
 mkdir -p "$STORAGE_DIR"
 
@@ -58,12 +56,10 @@ echo ""
 echo "  Storage:   local ($STORAGE_DIR)"
 echo "  LLM:       $LLM_ADAPTER"
 echo "  API:       http://localhost:$HTTP_PORT"
-echo "  API Key:   $API_KEY"
 echo ""
 echo "  Test with:"
 echo "    curl -X POST http://localhost:$HTTP_PORT/chat \\"
 echo "      -H 'Content-Type: application/json' \\"
-echo "      -H 'X-API-Key: $API_KEY' \\"
 echo "      -d '{\"agent_id\": \"test\", \"session_id\": \"1\", \"message\": \"Hello!\"}'"
 echo ""
 echo "  Press Ctrl+C to stop"

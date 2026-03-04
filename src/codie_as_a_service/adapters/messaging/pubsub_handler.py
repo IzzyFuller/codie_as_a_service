@@ -10,7 +10,6 @@ from synapse.protocols.publisher import PubSubPublisher
 from codie_as_a_service.adapters.messaging.models import AgentResponse, RunAgentRequest
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
 from codie_as_a_service.services.memory.memory_service import MemoryService
-from codie_as_a_service.services.schema_utils import json_schema_to_model
 
 logger = logging.getLogger(__name__)
 
@@ -38,18 +37,14 @@ class AgentMessageHandler:
     def handle(self, request: RunAgentRequest) -> None:
         """Process validated RunAgentRequest and publish response."""
         try:
-            output_model = (
-                json_schema_to_model(request.output_format)
-                if request.output_format
-                else None
-            )
             result = self._orchestrator.run(
                 session_id=request.session_id,
                 agent_id=request.agent_id,
                 instruction=request.message,
-                output_format=output_model,
             )
-            response_data = result.model_dump()
+            response_data = result.model_dump(
+                include={"response", "session_id", "done"}
+            )
             status = "success"
 
         except Exception as e:

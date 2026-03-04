@@ -3,7 +3,10 @@
 import logging
 
 from codie_as_a_service.core.models import Message, ToolDefinition
-from codie_as_a_service.core.phase_models import PhaseOutputModel, SessionContext
+from codie_as_a_service.core.phase_models import (
+    PhaseOutputModel,
+    SessionContext,
+)
 from codie_as_a_service.core.protocols import LLMProtocol
 from codie_as_a_service.services.memory.memory_service import MemoryService
 
@@ -49,43 +52,6 @@ class TextLLMPhaseDefinition:
             max_new_tokens=self._max_new_tokens,
         )
         self._output_schema(text_output=text_output).to_session_context(context)
-
-
-class FormatPhaseDefinition:
-    """Phase that shapes PROCESS text into structured output matching context.output_schema.
-
-    The only phase that uses schema-constrained LLM output. Takes context.response
-    (plain text from PROCESS) and produces validated JSON matching the client's
-    requested schema (or DefaultOutput).
-    """
-
-    def __init__(
-        self,
-        name: str,
-        llm: LLMProtocol,
-        system_prompt: str,
-    ) -> None:
-        self.name = name
-        self._llm = llm
-        self._system_prompt = system_prompt
-
-    def execute(self, context: SessionContext) -> None:
-        """Call LLM with output_schema constraint, write JSON to context.response."""
-        logger.info("Phase %s starting (iteration %d)", self.name, context.iteration)
-        result = self._llm.call(
-            messages=[
-                Message(
-                    role="user",
-                    content=context.response,
-                )
-            ],
-            system_prompt=f"{context.identity_summary}{self._system_prompt}",
-            output_model=context.output_schema,
-        )
-        # result is a validated BaseModel (DefaultOutput or client schema)
-        context.response = result.model_dump_json()
-        context.done = True
-        context.conversation_history.append(f"FORMAT: {context.response}")
 
 
 class SynthesizePhaseDefinition:

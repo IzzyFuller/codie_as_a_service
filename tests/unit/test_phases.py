@@ -3,7 +3,6 @@
 from unittest.mock import Mock
 
 from codie_as_a_service.core.phase_models import (
-    DefaultOutput,
     HydratedIdentity,
     SessionContext,
 )
@@ -21,7 +20,6 @@ class TestTextLLMPhaseDefinition:
             instruction="test instruction",
             frame="test frame",
             iteration=iteration,
-            output_schema=DefaultOutput,
         )
 
     def test_skip_on_retry_skips_llm_call_on_subsequent_iterations(self):

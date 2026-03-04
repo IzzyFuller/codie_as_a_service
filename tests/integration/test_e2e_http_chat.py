@@ -7,8 +7,8 @@ Tests describe the system from a CLIENT perspective using the CaaSClient library
 - Client errors surface as CaaSError exceptions
 - Client knows NOTHING about handlers, agents, adapters, memory services, etc.
 
-Most tests use a format-only orchestrator (1 LLM mock call).
-One canonical test exercises the full HYDRATE → PROCESS → FORMAT pipeline.
+Most tests use a process-only orchestrator (1 LLM mock call).
+One canonical test exercises the full HYDRATE → PROCESS pipeline.
 """
 
 import json
@@ -40,9 +40,7 @@ class TestE2EHTTPChat:
         """
         agent_id, session_id = setup_agent_memory(memory_service)
 
-        get_llm_mock(llm_adapter).return_value = json.dumps(
-            {"response": "I'm ready to help you.", "session_id": "", "done": True}
-        )
+        get_llm_mock(llm_adapter).return_value = "I'm ready to help you."
 
         result = next(
             caas_client.stream(
@@ -135,9 +133,7 @@ class TestE2EHTTPChat:
         """
         agent_id, session_id = setup_agent_memory(memory_service)
 
-        get_llm_mock(llm_adapter).return_value = json.dumps(
-            {"response": "Got it, preference saved!", "session_id": "", "done": True}
-        )
+        get_llm_mock(llm_adapter).return_value = "Got it, preference saved!"
 
         result = next(
             caas_client.stream(
@@ -166,9 +162,7 @@ class TestE2EHTTPChat:
             content="# Session\n\nWorking on PROJECT_ALPHA.",
         )
 
-        get_llm_mock(llm_adapter).return_value = json.dumps(
-            {"response": "You're on PROJECT_ALPHA.", "session_id": "", "done": True}
-        )
+        get_llm_mock(llm_adapter).return_value = "You're on PROJECT_ALPHA."
 
         result = next(
             caas_client.stream(
@@ -180,58 +174,17 @@ class TestE2EHTTPChat:
 
         assert result.response == "You're on PROJECT_ALPHA."
 
-    def test_structured_output_returns_custom_schema(
-        self, caas_client, memory_service, llm_adapter
-    ):
-        """
-        Given: Client sends request with output_format JSON schema
-        When: Agent processes the request
-        Then: raw_data contains the custom schema fields, not DefaultOutput shape
-        """
-        agent_id, session_id = setup_agent_memory(memory_service)
-
-        output_schema = {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "email": {"type": "string"},
-            },
-        }
-
-        get_llm_mock(llm_adapter).return_value = json.dumps(
-            {"name": "John", "email": "[email protected]"}
-        )
-
-        result = next(
-            caas_client.stream(
-                agent_id=agent_id,
-                session_id=session_id,
-                message="Extract contact: John ([email protected])",
-                output_format=output_schema,
-            )
-        )
-
-        assert result.raw_data["name"] == "John"
-        assert result.raw_data["email"] == "[email protected]"
-        # DefaultOutput fields should NOT be present
-        assert (
-            "response" not in result.raw_data
-            or result.raw_data.get("response") != "John"
-        ), "Custom schema should not include DefaultOutput's 'response' field"
-
     def test_response_contains_session_context_fields(
         self, caas_client, memory_service, llm_adapter
     ):
         """
         Given: A user exists with identity in memory
         When: Client sends chat message
-        Then: Response contains session_id and done fields from DefaultOutput
+        Then: Response contains session_id and done fields
         """
         agent_id, session_id = setup_agent_memory(memory_service)
 
-        get_llm_mock(llm_adapter).return_value = json.dumps(
-            {"response": "Hello!", "session_id": "", "done": True}
-        )
+        get_llm_mock(llm_adapter).return_value = "Hello!"
 
         result = next(
             caas_client.stream(agent_id=agent_id, session_id=session_id, message="Hi")
@@ -250,9 +203,7 @@ class TestE2EHTTPChat:
         """
         agent_id, _ = setup_agent_memory(memory_service)
 
-        get_llm_mock(llm_adapter).return_value = json.dumps(
-            {"response": "Hello!", "session_id": "", "done": True}
-        )
+        get_llm_mock(llm_adapter).return_value = "Hello!"
 
         result = next(caas_client.stream(agent_id=agent_id, message="Hi"))
 
@@ -263,17 +214,15 @@ class TestE2EHTTPChat:
     ):
         """
         Given: A user exists with identity in memory
-        When: Client sends chat and FORMAT sets done=true
+        When: Client sends chat and PROCESS sets done=true
         Then: Persisted current_session contains done=true in the JSON entry
 
-        SYNTHESIZE must run AFTER FORMAT so the persisted snapshot
+        SYNTHESIZE must run AFTER PROCESS so the persisted snapshot
         reflects the final pipeline state, not an intermediate one.
         """
         agent_id, session_id = setup_agent_memory(memory_service)
 
-        get_llm_mock(llm_adapter).return_value = json.dumps(
-            {"response": "Persisted correctly!", "session_id": "", "done": True}
-        )
+        get_llm_mock(llm_adapter).return_value = "Persisted correctly!"
 
         result = next(
             caas_client.stream(
@@ -301,9 +250,9 @@ class TestE2EHTTPChat:
 
 @pytest.mark.integration
 class TestE2EFullPipeline:
-    """Canonical all-phases E2E test exercising HYDRATE -> PROCESS -> FORMAT -> SYNTHESIZE."""
+    """Canonical all-phases E2E test exercising HYDRATE -> PROCESS -> SYNTHESIZE."""
 
-    def test_full_pipeline_hydrate_process_format_synthesize(
+    def test_full_pipeline_hydrate_process_synthesize(
         self, memory_service, llm_adapter, file_prompt_adapter
     ):
         """
@@ -316,7 +265,7 @@ class TestE2EFullPipeline:
         # Build full-pipeline orchestrator inline
         tools = get_memory_tool_definitions()
         phases, post_phases = build_orchestrator_phases(
-            phase_names=["hydrate", "process", "format"],
+            phase_names=["hydrate", "process"],
             prompt_adapter=file_prompt_adapter,
             tools=tools,
             llm=llm_adapter,
@@ -338,14 +287,11 @@ class TestE2EFullPipeline:
         )
         client = CaaSClient(app=app)
 
-        # 3-phase mock chain: HYDRATE (text) -> PROCESS (text) -> FORMAT (JSON)
+        # 2-phase mock chain: HYDRATE (text) -> PROCESS (text)
         mock = get_llm_mock(llm_adapter)
         mock.side_effect = [
             "Test identity summary for orchestrator testing.",
             "Full pipeline works!",
-            json.dumps(
-                {"response": "Full pipeline works!", "session_id": "", "done": True}
-            ),
         ]
 
         result = next(
@@ -364,8 +310,8 @@ class TestE2EFullPipeline:
         assert persisted is not None, "SYNTHESIZE should have written current_session"
         assert '"done": true' in persisted
 
-        # Verify all 3 LLM calls were made
-        assert mock.call_count == 3
+        # Verify all 2 LLM calls were made
+        assert mock.call_count == 2
 
 
 @pytest.mark.integration

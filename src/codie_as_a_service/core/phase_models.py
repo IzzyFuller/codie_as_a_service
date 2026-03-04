@@ -1,6 +1,6 @@
 """Phase output models and orchestration config for the ReActOrchestrator."""
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 # =============================================================================
 # Session Context (generic pipeline state)
@@ -18,20 +18,6 @@ class SessionContext(BaseModel):
     identity_summary: str = ""
     conversation_history: list[str] = []
     response: str = ""
-    done: bool = False
-    output_schema: type[BaseModel] = Field(exclude=True)
-
-
-# =============================================================================
-# Default Output
-# =============================================================================
-
-
-class DefaultOutput(BaseModel):
-    """Default output shape returned to clients when no output_format is specified."""
-
-    response: str = ""
-    session_id: str = ""
     done: bool = False
 
 
@@ -79,5 +65,6 @@ class ProcessedText(PhaseOutputModel):
 
     def to_session_context(self, context: SessionContext) -> SessionContext:
         context.response = self.text_output
+        context.done = True
         context.conversation_history.append(f"PROCESS: {self.text_output}")
         return context

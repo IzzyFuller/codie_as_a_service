@@ -21,6 +21,7 @@ dependencies = [
     "python-dotenv>=1.2.1",
     "outlines (>=0.2.0)",
     "mcp (>=1.0.0)",
+    "anthropic (>=0.52.0)",
 ]
 
 
@@ -41,6 +42,10 @@ demo = [
     "gradio (>=5.0.0,<7.0.0)",
     "httpx (>=0.28.1,<0.29.0)"
 ]
+lucea = [
+    "nicegui (>=2.0.0)",
+    "httpx (>=0.28.1,<0.29.0)",
+]
 
 [tool.coverage.run]
 omit = [
@@ -50,6 +55,7 @@ omit = [
     "*/main.py",
     "*/main_http.py",
     "*/main_pubsub.py",
+    "*/demo/*",
 ]
 
 [tool.mypy]

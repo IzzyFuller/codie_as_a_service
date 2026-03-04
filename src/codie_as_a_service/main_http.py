@@ -3,7 +3,7 @@
 import json
 import logging
 import os
-from typing import Any, Generator
+from typing import Generator
 
 import uvicorn
 from dotenv import load_dotenv
@@ -23,7 +23,6 @@ from codie_as_a_service.core.protocols import (
 )
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
 from codie_as_a_service.services.memory.memory_service import MemoryService
-from codie_as_a_service.services.schema_utils import json_schema_to_model
 from codie_as_a_service.services.wiring import (
     build_orchestrator_phases,
     get_mcp_tool_definitions,
@@ -44,7 +43,6 @@ class ChatRequest(BaseModel):
     agent_id: str
     session_id: str | None = None
     message: str
-    output_format: dict[str, Any] | None = None
 
 
 def create_app(
@@ -77,7 +75,7 @@ def create_app(
 
         # Build orchestrator — each phase owns its execution
         phases, post_phases = build_orchestrator_phases(
-            phase_names=["hydrate", "process", "format"],
+            phase_names=["hydrate", "process"],
             prompt_adapter=prompt_adapter,
             tools=tools,
             llm=llm_adapter,
@@ -93,23 +91,18 @@ def create_app(
         agent_id: str,
         session_id: str | None,
         message: str,
-        output_format: dict[str, Any] | None = None,
     ) -> Generator[str, None, None]:
         """Generate SSE events for chat response."""
         try:
             # Process through orchestrator
-            output_model = (
-                json_schema_to_model(output_format) if output_format else None
-            )
             result = orchestrator.run(
                 session_id=session_id,
                 agent_id=agent_id,
                 instruction=message,
-                output_format=output_model,
             )
 
-            # Emit structured response — always model_dump()
-            yield f"event: response\ndata: {json.dumps(result.model_dump())}\n\n"
+            # Emit structured response
+            yield f"event: response\ndata: {json.dumps(result.model_dump(include={'response', 'session_id', 'done'}))}\n\n"
 
             # Emit done event
             yield f"event: done\ndata: {json.dumps({'usage': {'input_tokens': 0, 'output_tokens': 0}})}\n\n"
@@ -138,7 +131,6 @@ def create_app(
                 request.agent_id,
                 request.session_id,
                 request.message,
-                request.output_format,
             ),
             media_type="text/event-stream",
         )

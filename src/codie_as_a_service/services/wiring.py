@@ -8,7 +8,6 @@ from codie_as_a_service.core.phase_models import HydratedIdentity, ProcessedText
 from codie_as_a_service.core.protocols import LLMProtocol, Phase, PromptProtocol
 from codie_as_a_service.services.memory.memory_service import MemoryService
 from codie_as_a_service.services.phases import (
-    FormatPhaseDefinition,
     SynthesizePhaseDefinition,
     TextLLMPhaseDefinition,
 )
@@ -140,10 +139,10 @@ def build_orchestrator_phases(
 ) -> tuple[list[Phase], list[Phase]]:
     """Build orchestrator phases filtered by phase_names list.
 
-    Pipeline: HYDRATE → PROCESS (text) → FORMAT (structured) → SYNTHESIZE (post-phase)
+    Pipeline: HYDRATE → PROCESS (text) → SYNTHESIZE (post-phase)
 
     Args:
-        phase_names: List of phase names to include (e.g., ["hydrate", "process", "format"])
+        phase_names: List of phase names to include (e.g., ["hydrate", "process"])
         prompt_adapter: Prompt adapter for fetching system prompts
         tools: Tool definitions to provide to phases
         llm: LLM adapter for phase execution
@@ -175,15 +174,6 @@ def build_orchestrator_phases(
                 output_schema=ProcessedText,
                 tools=tools,
                 max_new_tokens=32768,
-            )
-        )
-
-    if "format" in phase_names:
-        phases.append(
-            FormatPhaseDefinition(
-                name="format",
-                llm=llm,
-                system_prompt=prompt_adapter.get_prompt("orchestrator_format"),
             )
         )
 

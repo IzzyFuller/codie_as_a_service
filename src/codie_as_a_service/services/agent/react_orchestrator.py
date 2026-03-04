@@ -3,9 +3,7 @@
 import logging
 import uuid
 
-from pydantic import BaseModel
-
-from codie_as_a_service.core.phase_models import DefaultOutput, SessionContext
+from codie_as_a_service.core.phase_models import SessionContext
 from codie_as_a_service.core.protocols import Phase
 from codie_as_a_service.services.memory.memory_service import MemoryService
 
@@ -38,13 +36,11 @@ class ReActOrchestrator:
         agent_id: str,
         instruction: str,
         session_id: str | None = None,
-        output_format: type[BaseModel] | None = None,
-    ) -> BaseModel:
+    ) -> SessionContext:
         """
         Run the full orchestration loop.
 
-        Returns output_format model (defaults to SessionContext) populated
-        from the final context state.
+        Returns the final SessionContext after all phases complete.
         """
         session_id = session_id or str(uuid.uuid4())
         identity = self._memory.get_identity_context(agent_id=agent_id)
@@ -59,7 +55,6 @@ class ReActOrchestrator:
                 f"Context Anchors: {identity.context_anchors or ''}\n"
                 f"Current Session: {identity.current_session or ''}"
             ),
-            output_schema=output_format or DefaultOutput,
         )
 
         for iteration in range(self._max_outer_iterations):
@@ -74,4 +69,4 @@ class ReActOrchestrator:
         for post_phase in self._post_phases:
             post_phase.execute(context)
 
-        return context.output_schema.model_validate_json(context.response)
+        return context

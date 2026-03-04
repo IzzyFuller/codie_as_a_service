@@ -9,7 +9,6 @@ Tests describe the system from a CLIENT perspective using CaaSClient:
 Tests configure mock LLM responses inline and use caas_pubsub_client directly.
 """
 
-import json
 import time
 
 import pytest
@@ -32,14 +31,11 @@ class TestE2EAgentPubSub:
         """
         agent_id, session_id = setup_agent_memory(pubsub_memory_service)
 
-        # 3 LLM calls: HYDRATE → PROCESS → FORMAT
+        # 2 LLM calls: HYDRATE → PROCESS
         mock = get_llm_mock(pubsub_llm_adapter)
         mock.side_effect = [
             "Identity summary for pubsub test.",
             "I'm ready to help you.",
-            json.dumps(
-                {"response": "I'm ready to help you.", "session_id": "", "done": True}
-            ),
         ]
 
         response = caas_pubsub_client.request(
@@ -53,9 +49,7 @@ class TestE2EAgentPubSub:
         assert response.done is True
 
         mock.side_effect = None
-        mock.return_value = json.dumps(
-            {"response": "I'm ready to help you.", "session_id": "", "done": True}
-        )
+        mock.return_value = "I'm ready to help you."
 
     def test_receive_error_response_when_processing_fails(
         self, pubsub_memory_service, pubsub_llm_adapter, agent_app, caas_pubsub_client
@@ -116,52 +110,6 @@ class TestE2EAgentPubSub:
                 agent_id=agent_id, session_id=session_id, message="Hello"
             )
 
-    def test_structured_output_returns_custom_schema_shape(
-        self, pubsub_memory_service, pubsub_llm_adapter, agent_app, caas_pubsub_client
-    ):
-        """
-        Given: Client sends request with output_format JSON schema
-        When: Agent processes the request
-        Then: Client receives ChatResponse with raw_data shaped to custom schema
-
-        This is the critical test: output_format must flow from RunAgentRequest
-        through to orchestrator.run(), FORMAT must use the custom schema,
-        and the response must match it.
-        """
-        agent_id, session_id = setup_agent_memory(pubsub_memory_service)
-
-        output_schema = {
-            "type": "object",
-            "properties": {
-                "name": {"type": "string"},
-                "age": {"type": "integer"},
-            },
-        }
-
-        # 3 LLM calls: HYDRATE → PROCESS → FORMAT (custom schema)
-        mock = get_llm_mock(pubsub_llm_adapter)
-        mock.side_effect = [
-            "Identity summary for structured output test.",
-            json.dumps({"name": "Jane", "age": 30}),
-            json.dumps({"name": "Jane", "age": 30}),
-        ]
-
-        response = caas_pubsub_client.request(
-            agent_id=agent_id,
-            session_id=session_id,
-            message="Extract person info: Jane is 30 years old",
-            output_format=output_schema,
-        )
-
-        assert isinstance(response, ChatResponse)
-        assert response.raw_data["name"] == "Jane"
-        assert response.raw_data["age"] == 30
-
-        mock.side_effect = None
-        mock.return_value = json.dumps(
-            {"response": "I'm ready to help you.", "session_id": "", "done": True}
-        )
-
     def test_slow_llm_causes_client_timeout(
         self, pubsub_memory_service, pubsub_llm_adapter, agent_app, caas_pubsub_client
     ):
@@ -192,6 +140,4 @@ class TestE2EAgentPubSub:
 
         mock = get_llm_mock(pubsub_llm_adapter)
         mock.side_effect = None
-        mock.return_value = json.dumps(
-            {"response": "I'm ready to help you.", "session_id": "", "done": True}
-        )
+        mock.return_value = "I'm ready to help you."

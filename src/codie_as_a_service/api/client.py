@@ -40,9 +40,9 @@ from codie_as_a_service.adapters.messaging.models import (
 class ChatResponse(BaseModel):
     """Typed response from a CaaS call.
 
-    For DefaultOutput responses, `response`, `session_id`, and `done`
-    are populated directly. For custom output_format schemas, the full
-    response is available in `raw_data`.
+    Fields `response`, `session_id`, and `done` are populated from the
+    orchestrator's plain dict response. The full response dict is also
+    available in `raw_data`.
     """
 
     response: str = ""
@@ -130,7 +130,6 @@ class CaaSClient:
         agent_id: str,
         message: str,
         session_id: str | None = None,
-        output_format: dict[str, Any] | None = None,
     ) -> Generator[ChatResponse, None, None]:
         """Send a chat message via HTTP and yield responses as they arrive.
 
@@ -138,7 +137,6 @@ class CaaSClient:
             agent_id: Agent identifier for memory isolation.
             message: User message to the agent.
             session_id: Optional session ID (None = server generates one).
-            output_format: Optional JSON Schema for structured output.
 
         Yields:
             ChatResponse per response event.
@@ -150,7 +148,6 @@ class CaaSClient:
             agent_id=agent_id,
             session_id=session_id,
             message=message,
-            output_format=output_format,
         )
 
         payload = request.model_dump(exclude_none=True)
@@ -172,7 +169,6 @@ class CaaSClient:
         agent_id: str,
         message: str,
         session_id: str | None = None,
-        output_format: dict[str, Any] | None = None,
         timeout: float = 10.0,
     ) -> ChatResponse:
         """Send a message via pubsub and wait for the response.
@@ -181,7 +177,6 @@ class CaaSClient:
             agent_id: Agent identifier for memory isolation.
             message: User message to the agent.
             session_id: Optional session ID (None = server generates one).
-            output_format: Optional JSON Schema for structured output.
             timeout: Seconds to wait for response (default: 10).
 
         Returns:
@@ -194,7 +189,6 @@ class CaaSClient:
             agent_id=agent_id,
             session_id=session_id,
             message=message,
-            output_format=output_format,
         )
 
         # Declare agent-specific response queue

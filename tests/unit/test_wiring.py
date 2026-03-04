@@ -37,18 +37,17 @@ class TestBuildOrchestratorPhases:
         Then: All phases are built and returned in correct order
         """
         phases, post_phases = build_orchestrator_phases(
-            phase_names=["hydrate", "process", "format"],
+            phase_names=["hydrate", "process"],
             prompt_adapter=mock_prompt_adapter,
             tools=[],
             llm=mock_llm,
             memory=mock_memory,
         )
 
-        # Should have 3 main phases
-        assert len(phases) == 3
+        # Should have 2 main phases
+        assert len(phases) == 2
         assert phases[0].name == "hydrate"
         assert phases[1].name == "process"
-        assert phases[2].name == "format"
 
         # Should have 1 post phase (synthesize always included)
         assert len(post_phases) == 1
@@ -103,10 +102,10 @@ class TestBuildOrchestratorPhases:
         """
         Given: phase_names in non-standard order
         When: build_orchestrator_phases is called
-        Then: Phases are built in hardcoded order (hydrate, process, format)
+        Then: Phases are built in hardcoded order (hydrate, process)
         """
         phases, _ = build_orchestrator_phases(
-            phase_names=["format", "hydrate", "process"],
+            phase_names=["process", "hydrate"],
             prompt_adapter=mock_prompt_adapter,
             tools=[],
             llm=mock_llm,
@@ -114,10 +113,9 @@ class TestBuildOrchestratorPhases:
         )
 
         # Implementation uses hardcoded order, not phase_names order
-        assert len(phases) == 3
+        assert len(phases) == 2
         assert phases[0].name == "hydrate"
         assert phases[1].name == "process"
-        assert phases[2].name == "format"
 
 
 class TestToolDefinitions:

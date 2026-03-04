@@ -15,9 +15,6 @@ class RunAgentRequest(BaseModel):
         default=None, description="Session identifier for conversation continuity"
     )
     message: str = Field(..., description="User's message to the agent")
-    output_format: dict[str, Any] | None = Field(
-        default=None, description="Optional JSON Schema for structured output"
-    )
 
 
 class AgentResponse(BaseModel):

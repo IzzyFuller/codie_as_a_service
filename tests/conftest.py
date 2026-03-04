@@ -1,6 +1,5 @@
 """Pytest configuration and shared fixtures for ATDD."""
 
-import json
 import os
 import shutil
 import socket
@@ -17,6 +16,7 @@ from google.cloud import firestore
 from codie_as_a_service.api.client import CaaSClient
 from synapse.adapters.rabbitmq import RabbitMQPublisher, RabbitMQSubscriber
 
+from codie_as_a_service.adapters.llm.anthropic_adapter import AnthropicAPIAdapter
 from codie_as_a_service.adapters.llm.claude_cli_adapter import ClaudeCliAdapter
 from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
@@ -77,9 +77,15 @@ def setup_agent_memory(
 
 
 def get_llm_mock(llm_adapter) -> MagicMock:
-    """Return the adapter-specific mock for the LLM's internal method."""
+    """Return the mocked boundary method for any LLM adapter.
+
+    All three boundary methods return plain text, so tests can
+    uniformly set ``mock.return_value = "text"``.
+    """
     if isinstance(llm_adapter, ClaudeCliAdapter):
         return llm_adapter._run_claude
+    if isinstance(llm_adapter, AnthropicAPIAdapter):
+        return llm_adapter._create_message
     return llm_adapter._generate
 
 
@@ -266,12 +272,7 @@ def create_local_llm_adapter():
         adapter = LocalLLMAdapter(model_name="test-model")
 
     # Mock _generate directly - bypasses mlx_lm.generate
-    # Default must be valid DefaultOutput JSON so FORMAT phase can parse it
-    adapter._generate = MagicMock(
-        return_value=json.dumps(
-            {"response": "I'm ready to help you.", "session_id": "", "done": True}
-        )
-    )
+    adapter._generate = MagicMock(return_value="I'm ready to help you.")
 
     return adapter
 
@@ -280,12 +281,16 @@ def create_claude_cli_adapter():
     """Create ClaudeCliAdapter with mocked _run_claude method."""
     adapter = ClaudeCliAdapter()
     # Mock _run_claude - will be configured per-test via get_llm_mock()
-    # Default must be valid DefaultOutput JSON so FORMAT phase can parse it
-    adapter._run_claude = MagicMock(
-        return_value=json.dumps(
-            {"response": "I'm ready to help you.", "session_id": "", "done": True}
-        )
-    )
+    adapter._run_claude = MagicMock(return_value="I'm ready to help you.")
+    return adapter
+
+
+def create_anthropic_adapter():
+    """Create AnthropicAPIAdapter with mocked _create_message method."""
+    with patch("codie_as_a_service.adapters.llm.anthropic_adapter.anthropic"):
+        adapter = AnthropicAPIAdapter(api_key="test-key")
+
+    adapter._create_message = MagicMock(return_value="I'm ready to help you.")
     return adapter
 
 
@@ -294,6 +299,7 @@ def create_claude_cli_adapter():
     params=[
         pytest.param("local", id="local"),
         pytest.param("claude_cli", id="claude_cli"),
+        pytest.param("anthropic", id="anthropic"),
     ],
 )
 def llm_adapter_type(request):
@@ -311,6 +317,8 @@ def llm_adapter(llm_adapter_type):
         return create_local_llm_adapter()
     elif llm_adapter_type == "claude_cli":
         return create_claude_cli_adapter()
+    elif llm_adapter_type == "anthropic":
+        return create_anthropic_adapter()
     else:
         raise ValueError(f"Unknown LLM adapter type: {llm_adapter_type}")
 
@@ -349,7 +357,7 @@ def agent_app(
 
     tools = get_memory_tool_definitions()
     phases, post_phases = build_orchestrator_phases(
-        phase_names=["hydrate", "process", "format"],
+        phase_names=["hydrate", "process"],
         prompt_adapter=file_prompt_adapter,
         tools=tools,
         llm=pubsub_llm_adapter,
@@ -416,9 +424,6 @@ def file_prompt_adapter():
             "You are a processing agent. Execute the instruction using available tools. "
             "Return your response as plain text."
         ),
-        "orchestrator_format.txt": (
-            "You are a formatting agent. Format the response into the required JSON schema."
-        ),
     }
 
     # Write test prompt files
@@ -441,15 +446,15 @@ def file_prompt_adapter():
 
 @pytest.fixture(scope="function")
 def orchestrator(memory_service, llm_adapter, file_prompt_adapter):
-    """Build a format-only orchestrator for HTTP E2E tests.
+    """Build a process-only orchestrator for HTTP E2E tests.
 
-    Uses only FORMAT phase (1 LLM call) + SYNTHESIZE post-phase.
+    Uses only PROCESS phase (1 LLM call) + SYNTHESIZE post-phase.
     Most tests only need to verify the HTTP flow, response shape,
     and persistence — not multi-phase pipeline behavior.
     """
     tools = get_memory_tool_definitions()
     phases, post_phases = build_orchestrator_phases(
-        phase_names=["format"],
+        phase_names=["process"],
         prompt_adapter=file_prompt_adapter,
         tools=tools,
         llm=llm_adapter,

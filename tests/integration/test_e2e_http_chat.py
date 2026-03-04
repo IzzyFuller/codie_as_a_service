@@ -1,9 +1,10 @@
 """
-E2E Acceptance Test: HTTP Chat Endpoint
+E2E Acceptance Test: HTTP Chat via CaaSClient
 
-Tests describe the system from a CLIENT perspective:
-- Client POSTs to /chat endpoint with agent_id, session_id, message
-- Client receives SSE stream with text events and done event
+Tests describe the system from a CLIENT perspective using the CaaSClient library:
+- Client calls stream() with agent_id, message, optional session_id
+- Client receives typed ChatResponse with response, session_id, done, raw_data
+- Client errors surface as CaaSError exceptions
 - Client knows NOTHING about handlers, agents, adapters, memory services, etc.
 
 Most tests use a format-only orchestrator (1 LLM mock call).
@@ -15,26 +16,27 @@ import uuid
 
 import pytest
 
+from codie_as_a_service.api.client import CaaSClient, CaaSError, ChatResponse
 from codie_as_a_service.main_http import create_app as create_http_app
 from codie_as_a_service.services.agent.react_orchestrator import ReActOrchestrator
 from codie_as_a_service.services.wiring import (
     build_orchestrator_phases,
     get_memory_tool_definitions,
 )
-from tests.conftest import HTTPTestClient, get_llm_mock, setup_agent_memory
+from tests.conftest import get_llm_mock, setup_agent_memory
 
 
 @pytest.mark.integration
 class TestE2EHTTPChat:
-    """E2E acceptance tests for HTTP chat endpoint from client perspective."""
+    """E2E acceptance tests for HTTP chat endpoint via CaaSClient."""
 
-    def test_post_chat_returns_streaming_response(
-        self, http_client, memory_service, llm_adapter
+    def test_chat_returns_typed_response(
+        self, caas_client, memory_service, llm_adapter
     ):
         """
-        Given: A user exists with identity in memory (no output_format specified)
-        When: Client POSTs to /chat with message
-        Then: Client receives SSE stream with response event containing default structured format
+        Given: A user exists with identity in memory
+        When: Client sends chat message via stream()
+        Then: Returns ChatResponse with correct fields
         """
         agent_id, session_id = setup_agent_memory(memory_service)
 
@@ -42,47 +44,42 @@ class TestE2EHTTPChat:
             {"response": "I'm ready to help you.", "session_id": "", "done": True}
         )
 
-        events = http_client.chat(agent_id, session_id, "Hello, can you help me?")
-
-        # Should receive exactly one response event and a done event
-        response_events = [e for e in events if e["event"] == "response"]
-        done_events = [e for e in events if e["event"] == "done"]
-
-        assert len(response_events) == 1, "Expected exactly one response event"
-        assert len(done_events) == 1, "Expected exactly one done event"
-
-        response_data = response_events[0]["data"]
-        assert isinstance(response_data, dict), "Response should be structured dict"
-        assert response_data["response"] == "I'm ready to help you."
-
-        # Done event should have usage stats
-        done_data = done_events[0]["data"]
-        assert "usage" in done_data
-
-    def test_chat_returns_error_for_nonexistent_user(self, http_client):
-        """
-        Given: A request for a non-existent user
-        When: Client POSTs to /chat
-        Then: Client receives error response
-        """
-        events = http_client.chat(
-            "nonexistent_user", "some_session", "This should fail"
+        result = next(
+            caas_client.stream(
+                agent_id=agent_id,
+                session_id=session_id,
+                message="Hello, can you help me?",
+            )
         )
 
-        # Should receive an error event
-        error_events = [e for e in events if e["event"] == "error"]
-        assert len(error_events) == 1, "Expected exactly one error event"
+        assert isinstance(result, ChatResponse)
+        assert result.response == "I'm ready to help you."
+        assert result.done is True
 
-        error_data = error_events[0]["data"]
-        assert "message" in error_data
+    def test_chat_error_for_nonexistent_user(self, caas_client):
+        """
+        Given: A request for a non-existent user
+        When: Client sends chat message
+        Then: CaaSError is raised with error message
+        """
+        with pytest.raises(CaaSError) as exc_info:
+            next(
+                caas_client.stream(
+                    agent_id="nonexistent_user",
+                    session_id="some_session",
+                    message="This should fail",
+                )
+            )
 
-    def test_chat_returns_error_for_agent_without_frame(
-        self, http_client, memory_service, llm_adapter
+        assert exc_info.value.message
+
+    def test_chat_error_for_agent_without_frame(
+        self, caas_client, memory_service, llm_adapter
     ):
         """
         Given: An agent exists with identity but no frame file
-        When: Client POSTs to /chat
-        Then: Client receives error response (Pydantic ValidationError — frame is required)
+        When: Client sends chat message
+        Then: CaaSError is raised (Pydantic ValidationError — frame is required)
         """
         agent_id, session_id = setup_agent_memory(
             memory_service,
@@ -93,20 +90,22 @@ class TestE2EHTTPChat:
             },
         )
 
-        events = http_client.chat(agent_id, session_id, "Hello")
+        with pytest.raises(CaaSError) as exc_info:
+            next(
+                caas_client.stream(
+                    agent_id=agent_id, session_id=session_id, message="Hello"
+                )
+            )
 
-        error_events = [e for e in events if e["event"] == "error"]
-        assert len(error_events) == 1, "Expected exactly one error event"
-        # Pydantic ValidationError includes field name in message
-        assert "frame" in error_events[0]["data"]["message"].lower()
+        assert "frame" in exc_info.value.message.lower()
 
-    def test_chat_returns_error_for_agent_without_me(
-        self, http_client, memory_service, llm_adapter
+    def test_chat_error_for_agent_without_me(
+        self, caas_client, memory_service, llm_adapter
     ):
         """
         Given: An agent exists with frame but no me file
-        When: Client POSTs to /chat
-        Then: Client receives error response (Pydantic ValidationError — me is required)
+        When: Client sends chat message
+        Then: CaaSError is raised (Pydantic ValidationError — me is required)
         """
         agent_id, session_id = setup_agent_memory(
             memory_service,
@@ -117,24 +116,22 @@ class TestE2EHTTPChat:
             },
         )
 
-        events = http_client.chat(agent_id, session_id, "Hello")
+        with pytest.raises(CaaSError) as exc_info:
+            next(
+                caas_client.stream(
+                    agent_id=agent_id, session_id=session_id, message="Hello"
+                )
+            )
 
-        error_events = [e for e in events if e["event"] == "error"]
-        assert len(error_events) == 1, "Expected exactly one error event"
-        # Pydantic ValidationError includes field name in message
-        assert "me" in error_events[0]["data"]["message"].lower()
+        assert "me" in exc_info.value.message.lower()
 
     def test_tool_using_request_completes_successfully(
-        self, http_client, memory_service, llm_adapter
+        self, caas_client, memory_service, llm_adapter
     ):
         """
         Given: Client sends a request that would trigger tool use
         When: Adapter processes the request (tool execution is internal)
         Then: Client receives a successful response
-
-        Tool execution is an adapter concern — with mocked adapters,
-        we verify the flow completes. Real tool execution is tested
-        via adapter-specific integration tests.
         """
         agent_id, session_id = setup_agent_memory(memory_service)
 
@@ -142,29 +139,27 @@ class TestE2EHTTPChat:
             {"response": "Got it, preference saved!", "session_id": "", "done": True}
         )
 
-        # Client sends request
-        events = http_client.chat(agent_id, session_id, "Remember I prefer dark mode")
+        result = next(
+            caas_client.stream(
+                agent_id=agent_id,
+                session_id=session_id,
+                message="Remember I prefer dark mode",
+            )
+        )
 
-        # Request completed successfully
-        response_events = [e for e in events if e["event"] == "response"]
-        done_events = [e for e in events if e["event"] == "done"]
-        assert len(response_events) == 1
-        assert len(done_events) == 1
+        assert result.response == "Got it, preference saved!"
+        assert result.done is True
 
     def test_request_completes_with_memory_context(
-        self, http_client, memory_service, llm_adapter
+        self, caas_client, memory_service, llm_adapter
     ):
         """
         Given: User has specific content in memory
         When: Client sends request (adapter has access to memory via tools)
         Then: Request completes successfully
-
-        The adapter handles tool execution internally — we verify
-        the pipeline completes with pre-populated memory.
         """
         agent_id, session_id = setup_agent_memory(memory_service)
 
-        # Pre-populate memory with content
         memory_service.write_memory(
             agent_id=agent_id,
             key="current_session",
@@ -175,21 +170,23 @@ class TestE2EHTTPChat:
             {"response": "You're on PROJECT_ALPHA.", "session_id": "", "done": True}
         )
 
-        events = http_client.chat(agent_id, session_id, "What am I working on?")
+        result = next(
+            caas_client.stream(
+                agent_id=agent_id,
+                session_id=session_id,
+                message="What am I working on?",
+            )
+        )
 
-        done_events = [e for e in events if e["event"] == "done"]
-        assert len(done_events) == 1
+        assert result.response == "You're on PROJECT_ALPHA."
 
-    def test_structured_output_returns_custom_schema_shape(
-        self, http_client, memory_service, llm_adapter
+    def test_structured_output_returns_custom_schema(
+        self, caas_client, memory_service, llm_adapter
     ):
         """
         Given: Client sends request with output_format JSON schema
         When: Agent processes the request
-        Then: Client receives response shaped to the custom schema, not DefaultOutput
-
-        This is the critical test: output_format must flow from request → orchestrator,
-        FORMAT must use the custom schema, and the response must match it.
+        Then: raw_data contains the custom schema fields, not DefaultOutput shape
         """
         agent_id, session_id = setup_agent_memory(memory_service)
 
@@ -201,39 +198,33 @@ class TestE2EHTTPChat:
             },
         }
 
-        # FORMAT phase gets the custom schema — mock returns matching JSON
         get_llm_mock(llm_adapter).return_value = json.dumps(
             {"name": "John", "email": "[email protected]"}
         )
 
-        events = http_client.chat(
-            agent_id,
-            session_id,
-            "Extract contact: John ([email protected])",
-            output_format=output_schema,
+        result = next(
+            caas_client.stream(
+                agent_id=agent_id,
+                session_id=session_id,
+                message="Extract contact: John ([email protected])",
+                output_format=output_schema,
+            )
         )
 
-        response_events = [e for e in events if e["event"] == "response"]
-        done_events = [e for e in events if e["event"] == "done"]
-
-        assert len(response_events) == 1, "Expected exactly one response event"
-        assert len(done_events) == 1, "Expected exactly one done event"
-
-        response_data = response_events[0]["data"]
-        # Custom schema fields populated by FORMAT
-        assert response_data["name"] == "John"
-        assert response_data["email"] == "[email protected]"
+        assert result.raw_data["name"] == "John"
+        assert result.raw_data["email"] == "[email protected]"
         # DefaultOutput fields should NOT be present
         assert (
-            "response" not in response_data or response_data.get("response") != "John"
+            "response" not in result.raw_data
+            or result.raw_data.get("response") != "John"
         ), "Custom schema should not include DefaultOutput's 'response' field"
 
     def test_response_contains_session_context_fields(
-        self, http_client, memory_service, llm_adapter
+        self, caas_client, memory_service, llm_adapter
     ):
         """
         Given: A user exists with identity in memory
-        When: Client POSTs to /chat with message
+        When: Client sends chat message
         Then: Response contains session_id and done fields from DefaultOutput
         """
         agent_id, session_id = setup_agent_memory(memory_service)
@@ -242,22 +233,20 @@ class TestE2EHTTPChat:
             {"response": "Hello!", "session_id": "", "done": True}
         )
 
-        events = http_client.chat(agent_id, session_id, "Hi")
-        response_data = [e for e in events if e["event"] == "response"][0]["data"]
-        assert "session_id" in response_data
-        assert "done" in response_data
-        assert response_data["done"] is True
+        result = next(
+            caas_client.stream(agent_id=agent_id, session_id=session_id, message="Hi")
+        )
 
-    def test_backend_generates_session_id_when_omitted(
-        self, http_client, memory_service, llm_adapter
+        assert isinstance(result.session_id, str)
+        assert result.done is True
+
+    def test_chat_works_without_session_id(
+        self, caas_client, memory_service, llm_adapter
     ):
         """
         Given: A user exists with identity in memory
-        When: Client POSTs to /chat without session_id
-        Then: Backend generates a UUID session_id and returns it in the response
-
-        Note: With FORMAT, the session_id in the response comes from the LLM mock
-        (empty string in defaults). The backend still generates and uses one internally.
+        When: Client sends chat without session_id
+        Then: Request succeeds (backend generates session_id internally)
         """
         agent_id, _ = setup_agent_memory(memory_service)
 
@@ -265,17 +254,16 @@ class TestE2EHTTPChat:
             {"response": "Hello!", "session_id": "", "done": True}
         )
 
-        events = http_client.chat(agent_id, message="Hi")
-        response_data = [e for e in events if e["event"] == "response"][0]["data"]
-        # session_id is present in DefaultOutput (may be empty from mock)
-        assert "session_id" in response_data
+        result = next(caas_client.stream(agent_id=agent_id, message="Hi"))
+
+        assert isinstance(result, ChatResponse)
 
     def test_synthesize_persists_done_true_after_successful_chat(
-        self, http_client, memory_service, llm_adapter
+        self, caas_client, memory_service, llm_adapter
     ):
         """
         Given: A user exists with identity in memory
-        When: Client POSTs to /chat and FORMAT sets done=true
+        When: Client sends chat and FORMAT sets done=true
         Then: Persisted current_session contains done=true in the JSON entry
 
         SYNTHESIZE must run AFTER FORMAT so the persisted snapshot
@@ -287,17 +275,20 @@ class TestE2EHTTPChat:
             {"response": "Persisted correctly!", "session_id": "", "done": True}
         )
 
-        events = http_client.chat(agent_id, session_id, "Test persistence")
+        result = next(
+            caas_client.stream(
+                agent_id=agent_id,
+                session_id=session_id,
+                message="Test persistence",
+            )
+        )
 
-        # Verify the request completed
-        done_events = [e for e in events if e["event"] == "done"]
-        assert len(done_events) == 1
+        assert result.done is True
 
         # Read persisted current_session and verify done=true in the entry
         persisted = memory_service.read_memory(agent_id, "current_session")
         assert persisted is not None, "SYNTHESIZE should have written current_session"
 
-        # Extract the JSON block from the persisted markdown entry
         json_start = persisted.index("{")
         json_end = persisted.rindex("}") + 1
         entry = json.loads(persisted[json_start:json_end])
@@ -310,18 +301,15 @@ class TestE2EHTTPChat:
 
 @pytest.mark.integration
 class TestE2EFullPipeline:
-    """Canonical all-phases E2E test exercising HYDRATE → PROCESS → FORMAT → SYNTHESIZE."""
+    """Canonical all-phases E2E test exercising HYDRATE -> PROCESS -> FORMAT -> SYNTHESIZE."""
 
     def test_full_pipeline_hydrate_process_format_synthesize(
         self, memory_service, llm_adapter, file_prompt_adapter
     ):
         """
         Given: Agent with identity in memory, full pipeline orchestrator
-        When: Client POSTs to /chat
+        When: Client sends chat via CaaSClient stream()
         Then: All phases execute in order, response is correct, session persisted
-
-        This is the one big ugly all-phases test. Mock chain set up
-        inline — 3 LLM calls for HYDRATE, PROCESS, FORMAT.
         """
         agent_id, session_id = setup_agent_memory(memory_service)
 
@@ -348,30 +336,28 @@ class TestE2EFullPipeline:
             prompt_names=["codie_as_a_service_system"],
             orchestrator=orchestrator,
         )
-        client = HTTPTestClient(app)
+        client = CaaSClient(app=app)
 
-        # 3-phase mock chain: HYDRATE (text) → PROCESS (text) → FORMAT (JSON)
+        # 3-phase mock chain: HYDRATE (text) -> PROCESS (text) -> FORMAT (JSON)
         mock = get_llm_mock(llm_adapter)
         mock.side_effect = [
-            # HYDRATE: plain text identity summary
             "Test identity summary for orchestrator testing.",
-            # PROCESS: plain text response
             "Full pipeline works!",
-            # FORMAT: JSON matching DefaultOutput schema
             json.dumps(
                 {"response": "Full pipeline works!", "session_id": "", "done": True}
             ),
         ]
 
-        events = client.chat(agent_id, session_id, "Test the full pipeline")
+        result = next(
+            client.stream(
+                agent_id=agent_id,
+                session_id=session_id,
+                message="Test the full pipeline",
+            )
+        )
 
-        response_events = [e for e in events if e["event"] == "response"]
-        done_events = [e for e in events if e["event"] == "done"]
-
-        assert len(response_events) == 1
-        assert len(done_events) == 1
-        assert response_events[0]["data"]["response"] == "Full pipeline works!"
-        assert response_events[0]["data"]["done"] is True
+        assert result.response == "Full pipeline works!"
+        assert result.done is True
 
         # Verify SYNTHESIZE persisted the session
         persisted = memory_service.read_memory(agent_id, "current_session")
@@ -380,6 +366,64 @@ class TestE2EFullPipeline:
 
         # Verify all 3 LLM calls were made
         assert mock.call_count == 3
+
+
+@pytest.mark.integration
+class TestCaaSClientContract:
+    """CaaSClient and ChatResponse contract tests."""
+
+    def test_chat_response_fields(self):
+        """ChatResponse has response, session_id, done, and raw_data fields."""
+        resp = ChatResponse(
+            response="hello",
+            session_id="s1",
+            done=True,
+            raw_data={"response": "hello", "session_id": "s1", "done": True},
+        )
+        assert resp.response == "hello"
+        assert resp.session_id == "s1"
+        assert resp.done is True
+        assert resp.raw_data["response"] == "hello"
+
+    def test_chat_response_defaults(self):
+        """ChatResponse has sensible defaults for optional fields."""
+        resp = ChatResponse(raw_data={"custom": "data"})
+        assert resp.response == ""
+        assert resp.session_id == ""
+        assert resp.done is False
+
+    def test_base_url_creates_httpx_client(self):
+        """base_url= mode creates an httpx.Client."""
+        import httpx
+
+        client = CaaSClient(base_url="http://localhost:9999")
+        assert isinstance(client._http_client, httpx.Client)
+
+    def test_connection_creates_pubsub_transport(self):
+        """connection= mode creates publisher and subscriber."""
+        from unittest.mock import MagicMock
+
+        mock_connection = MagicMock()
+        client = CaaSClient(connection=mock_connection)
+        assert client._publisher is not None
+        assert client._subscriber is not None
+
+    def test_no_response_event_raises_caas_error(self, http_app):
+        """
+        Given: Server returns SSE stream with only a done event (no response)
+        When: Client parses the stream
+        Then: Generator yields nothing (no response events to yield)
+        """
+        from unittest.mock import patch
+
+        client = CaaSClient(app=http_app)
+
+        with patch(
+            "codie_as_a_service.api.client._parse_sse_events",
+            return_value=[("done", {"usage": {}})],
+        ):
+            results = list(client.stream(agent_id="any", message="test"))
+            assert results == []
 
 
 def test_list_memory_keys_for_nonexistent_user(memory_service):

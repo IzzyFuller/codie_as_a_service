@@ -14,12 +14,11 @@ from unittest.mock import MagicMock, patch
 import pika
 import pytest
 from google.cloud import firestore
-from starlette.testclient import TestClient as StarletteTestClient
+from codie_as_a_service.api.client import CaaSClient
 from synapse.adapters.rabbitmq import RabbitMQPublisher, RabbitMQSubscriber
 
 from codie_as_a_service.adapters.llm.claude_cli_adapter import ClaudeCliAdapter
 from codie_as_a_service.adapters.llm.local_llm_adapter import LocalLLMAdapter
-from codie_as_a_service.adapters.messaging.models import AgentResponse, RunAgentRequest
 from codie_as_a_service.adapters.prompts.file_adapter import FilePromptAdapter
 from codie_as_a_service.adapters.storage.local_adapter import LocalMemoryAdapter
 from codie_as_a_service.main_http import create_app as create_http_app
@@ -384,86 +383,15 @@ def agent_app(
 # ============================================================================
 
 
-class TestClient:
-    """Client for E2E tests - simulates external client interacting with the system."""
-
-    def __init__(
-        self,
-        connection: pika.BlockingConnection,
-        publisher: RabbitMQPublisher,
-        subscriber: RabbitMQSubscriber,
-        request_subscription: str,
-        response_topic: str,
-    ):
-        self._connection = connection
-        self._publisher = publisher
-        self._subscriber = subscriber
-        self._request_subscription = request_subscription
-        self._response_topic = response_topic
-
-    def send_request(
-        self,
-        agent_id: str,
-        session_id: str,
-        message: str,
-        output_format: dict | None = None,
-        timeout_seconds: int = 10,
-    ):
-        """Publish request and wait for response on agent-specific queue."""
-        # Declare agent-specific response queue (matches handler routing)
-        agent_response_queue = f"{self._response_topic}.{agent_id}"
-        setup_channel = self._connection.channel()
-        setup_channel.queue_declare(queue=agent_response_queue, durable=True)
-        setup_channel.close()
-
-        request = RunAgentRequest(
-            agent_id=agent_id,
-            session_id=session_id,
-            message=message,
-            output_format=output_format,
-        )
-        # Publish to request topic
-        self._publisher.publish(
-            f":{self._request_subscription}", request.model_dump_json().encode("utf-8")
-        ).result()
-
-        # Wait for response on agent-specific queue
-        deadline = time.time() + timeout_seconds
-        while time.time() < deadline:
-            pull_response = self._subscriber.pull(
-                request={
-                    "subscription": agent_response_queue,
-                    "max_messages": 1,
-                },
-                timeout=1,
-            )
-            if pull_response.received_messages:
-                msg = pull_response.received_messages[0]
-                self._subscriber.acknowledge(
-                    request={
-                        "subscription": agent_response_queue,
-                        "ack_ids": [msg.ack_id],
-                    }
-                )
-                data = json.loads(msg.message.data.decode("utf-8"))
-                return AgentResponse(**data)
-            time.sleep(0.5)
-
-        return None
-
-
 @pytest.fixture(scope="session")
-def test_client(rabbitmq_connection, rabbitmq_infrastructure):
-    """Provide a test client with its own publisher/subscriber."""
-    # Create separate connection for test client to avoid channel conflicts
+def caas_pubsub_client(rabbitmq_connection, rabbitmq_infrastructure):
+    """Provide a CaaSClient wired to RabbitMQ for pubsub E2E tests."""
     client_connection = pika.BlockingConnection(
         pika.ConnectionParameters(host="localhost", port=RABBITMQ_PORT)
     )
-    return TestClient(
+    return CaaSClient(
         connection=client_connection,
-        publisher=RabbitMQPublisher(client_connection),
-        subscriber=RabbitMQSubscriber(client_connection),
-        request_subscription=REQUEST_SUBSCRIPTION,
+        request_topic=REQUEST_SUBSCRIPTION,
         response_topic=RESPONSE_TOPIC,
     )
 
@@ -554,49 +482,10 @@ def http_app(
     )
 
 
-class HTTPTestClient:
-    """Client for HTTP E2E tests - simulates external client interacting with the system."""
-
-    def __init__(self, app):
-        self._client = StarletteTestClient(app)
-
-    def health(self):
-        """GET /health endpoint."""
-        return self._client.get("/health")
-
-    def chat(
-        self,
-        agent_id: str,
-        session_id: str | None = None,
-        message: str = "",
-        output_format: dict | None = None,
-    ) -> list[dict]:
-        """POST to /chat and collect SSE events."""
-        payload: dict = {"agent_id": agent_id, "message": message}
-        if session_id is not None:
-            payload["session_id"] = session_id
-        if output_format:
-            payload["output_format"] = output_format
-        response = self._client.post("/chat", json=payload)
-
-        # Parse SSE response
-        events = []
-        for line in response.text.split("\n"):
-            if line.startswith("event:"):
-                current_event = {"event": line[6:].strip()}
-            elif line.startswith("data:"):
-                data_str = line[5:].strip()
-                if data_str:
-                    current_event["data"] = json.loads(data_str)
-                    events.append(current_event)
-
-        return events
-
-
 @pytest.fixture(scope="function")
-def http_client(http_app):
-    """Provide an HTTP test client for E2E tests."""
-    return HTTPTestClient(http_app)
+def caas_client(http_app):
+    """Provide a CaaSClient wired to the test FastAPI app for E2E tests."""
+    return CaaSClient(app=http_app)
 
 
 # ============================================================================

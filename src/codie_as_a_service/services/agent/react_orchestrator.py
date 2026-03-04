@@ -1,6 +1,7 @@
 """ReActOrchestrator - Multi-phase orchestration loop."""
 
 import logging
+import uuid
 
 from pydantic import BaseModel
 
@@ -34,7 +35,8 @@ class ReActOrchestrator:
 
     def run(
         self,
-        session_id: str,
+        session_id: str | None = None,
+        *,
         agent_id: str,
         instruction: str,
         output_format: type[BaseModel] | None = None,
@@ -45,6 +47,7 @@ class ReActOrchestrator:
         Returns output_format model (defaults to SessionContext) populated
         from the final context state.
         """
+        session_id = session_id or str(uuid.uuid4())
         identity = self._memory.get_identity_context(agent_id=agent_id)
 
         context = SessionContext(

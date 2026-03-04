@@ -4,11 +4,11 @@ Simple UI to demonstrate streaming chat with the HTTP endpoint.
 Not for production deployment - demo purposes only.
 """
 
-import json
 import os
 
 import gradio as gr
-import httpx
+
+from codie_as_a_service.api.client import CaaSClient, CaaSError
 
 
 # Configuration
@@ -16,55 +16,20 @@ API_BASE_URL = os.environ.get("DEEP_AGENT_API_URL", "http://localhost:8080")
 DEFAULT_AGENT_ID = os.environ.get("DEMO_AGENT_ID", "demo-user")
 LLM_TIMEOUT = int(os.environ.get("LLM_TIMEOUT", "300"))
 
-
-def parse_sse_events(response: httpx.Response):
-    """Parse SSE events from streaming response."""
-    current_event = None
-
-    for line in response.iter_lines():
-        line = line.strip()
-        if not line:
-            continue
-
-        if line.startswith("event:"):
-            current_event = line[6:].strip()
-        elif line.startswith("data:"):
-            data_str = line[5:].strip()
-            if data_str:
-                data = json.loads(data_str)
-                yield current_event, data
+# Single client instance
+client = CaaSClient(base_url=API_BASE_URL, timeout=float(LLM_TIMEOUT))
 
 
-def chat(message: str, history: list[dict], agent_id: str, session_state: dict):
+def chat(message: str, _history: list[dict], agent_id: str, _session_state: dict):
     """Send message to agent and stream response."""
-    # First message: omit session_id so backend generates one.
-    # Subsequent messages: reuse the session_id from the first response.
-    payload: dict = {
-        "agent_id": agent_id or DEFAULT_AGENT_ID,
-        "message": message,
-    }
-    if session_state.get("session_id"):
-        payload["session_id"] = session_state["session_id"]
-
-    with httpx.Client(timeout=float(LLM_TIMEOUT)) as client:
-        with client.stream(
-            "POST",
-            f"{API_BASE_URL}/chat",
-            json=payload,
-        ) as response:
-            response.raise_for_status()
-
-            full_response = ""
-            for event_type, data in parse_sse_events(response):
-                if event_type == "response":
-                    # Capture session_id from backend for reuse
-                    if "session_id" in data:
-                        session_state["session_id"] = data["session_id"]
-                    full_response = data.get("output", "")
-                    yield full_response
-                elif event_type == "error":
-                    yield f"Error: {data.get('message', 'Unknown error')}"
-                    return
+    try:
+        for response in client.stream(
+            agent_id=agent_id or DEFAULT_AGENT_ID,
+            message=message,
+        ):
+            yield response.response
+    except CaaSError as e:
+        yield f"Error: {e.message}"
 
 
 def create_demo() -> gr.Blocks:

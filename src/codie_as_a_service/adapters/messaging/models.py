@@ -11,8 +11,8 @@ class RunAgentRequest(BaseModel):
     agent_id: str = Field(
         ..., description="Agent identifier for agent memory isolation"
     )
-    session_id: str = Field(
-        ..., description="Session identifier for conversation continuity"
+    session_id: str | None = Field(
+        default=None, description="Session identifier for conversation continuity"
     )
     message: str = Field(..., description="User's message to the agent")
     output_format: dict[str, Any] | None = Field(

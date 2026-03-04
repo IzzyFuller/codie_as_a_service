@@ -3,7 +3,6 @@
 import json
 import logging
 import os
-import uuid
 from typing import Any, Generator
 
 import uvicorn
@@ -92,7 +91,7 @@ def create_app(
 
     def generate_sse_events(
         agent_id: str,
-        session_id: str,
+        session_id: str | None,
         message: str,
         output_format: dict[str, Any] | None = None,
     ) -> Generator[str, None, None]:
@@ -134,11 +133,10 @@ def create_app(
         - event: done, data: {"usage": {...}}
         - event: error, data: {"message": "..."}
         """
-        session_id = request.session_id or str(uuid.uuid4())
         return StreamingResponse(
             generate_sse_events(
                 request.agent_id,
-                session_id,
+                request.session_id,
                 request.message,
                 request.output_format,
             ),

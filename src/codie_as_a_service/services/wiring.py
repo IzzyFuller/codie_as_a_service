@@ -174,6 +174,7 @@ def build_orchestrator_phases(
                 system_prompt=prompt_adapter.get_prompt("orchestrator_process"),
                 output_schema=ProcessedText,
                 tools=tools,
+                max_new_tokens=32768,
             )
         )
 

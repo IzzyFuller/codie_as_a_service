@@ -21,6 +21,7 @@ class TextLLMPhaseDefinition:
         output_schema: type[PhaseOutputModel],
         tools: list[ToolDefinition] = [],
         skip_on_retry: bool = False,
+        max_new_tokens: int | None = None,
     ) -> None:
         self.name = name
         self._llm = llm
@@ -28,6 +29,7 @@ class TextLLMPhaseDefinition:
         self._output_schema = output_schema
         self._tools = tools
         self._skip_on_retry = skip_on_retry
+        self._max_new_tokens = max_new_tokens
 
     def execute(self, context: SessionContext) -> None:
         """Call LLM, wrap text in output schema, apply to context."""
@@ -44,6 +46,7 @@ class TextLLMPhaseDefinition:
             ],
             system_prompt=f"{context.identity_summary}{self._system_prompt}",
             tools=self._tools,
+            max_new_tokens=self._max_new_tokens,
         )
         self._output_schema(text_output=text_output).to_session_context(context)
 

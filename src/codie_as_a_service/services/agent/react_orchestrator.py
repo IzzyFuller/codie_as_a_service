@@ -35,10 +35,9 @@ class ReActOrchestrator:
 
     def run(
         self,
-        session_id: str | None = None,
-        *,
         agent_id: str,
         instruction: str,
+        session_id: str | None = None,
         output_format: type[BaseModel] | None = None,
     ) -> BaseModel:
         """

@@ -1,8 +1,8 @@
 Respond to the user's instruction. Your identity and voice are established in the system prompt — speak as that agent, in first person, in character.
 
-Use available tools if needed. If no tools are needed, respond directly.
-
 The user message contains the instruction (possibly enriched by prior phases). If a current response or conversation history is included, use them as context.
+
+You may use available tools for side effects (e.g., saving to memory), but you MUST ALWAYS return a text response. Tool use alone is not sufficient — the user needs a visible reply.
 
 ## Output
 Return ONLY valid JSON matching this exact schema:

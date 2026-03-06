@@ -83,13 +83,18 @@ def create_lucea_app(
             # Chat input — hidden until playback completes
             with (
                 ui.row()
-                .classes("chat-input-area w-full")
+                .classes("chat-input-area w-full items-center")
                 .style("display: none") as chat_row
             ):
                 chat_input = (
                     ui.input(placeholder="Type a message as the nurse...")
-                    .classes("w-full")
+                    .classes("flex-grow")
                     .props("outlined dense dark")
+                )
+                send_button = (
+                    ui.button("Send", color="primary")
+                    .props("dense flat")
+                    .classes("ml-2")
                 )
 
         # Right panel — Caller side (45%)
@@ -105,7 +110,7 @@ def create_lucea_app(
     )
 
     # ── Chat handler ─────────────────────────────────────────────────
-    async def _on_chat_submit() -> None:
+    async def _on_chat_submit(_event=None) -> None:
         message = chat_input.value
         if not message or not message.strip():
             return
@@ -126,10 +131,17 @@ def create_lucea_app(
         # Route through CaaS if available, otherwise show placeholder
         if caas_client is not None:
             try:
-                for response in caas_client.stream(
-                    agent_id="nurse-sarah",
-                    message=message,
-                ):
+                # Run blocking HTTP call in a thread to avoid freezing
+                # NiceGUI's async event loop (and dropping the websocket)
+                loop = asyncio.get_event_loop()
+                responses = await loop.run_in_executor(
+                    None,
+                    lambda: list(caas_client.stream(
+                        agent_id="nurse-sarah",
+                        message=message,
+                    )),
+                )
+                for response in responses:
                     if response.done:
                         presenter.show_response(response.response)
             except Exception as exc:
@@ -142,6 +154,7 @@ def create_lucea_app(
             )
 
     chat_input.on("keydown.enter", _on_chat_submit)
+    send_button.on_click(_on_chat_submit)
 
     # ── Kick off playback ────────────────────────────────────────────
     ui.timer(0.5, lambda: _play_transcript(events, presenter), once=True)

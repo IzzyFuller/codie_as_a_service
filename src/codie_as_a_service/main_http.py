@@ -160,8 +160,16 @@ def main() -> None:
     )
 
     # Initialize LLM adapter based on type
-    if llm_adapter_type == "claude_cli":
-        llm_adapter: LLMProtocol = ClaudeCliAdapter()
+    if llm_adapter_type == "anthropic":
+        from codie_as_a_service.adapters.llm.anthropic_adapter import (
+            AnthropicAPIAdapter,
+        )
+
+        api_key = os.environ["ANTHROPIC_API_KEY"]
+        model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+        llm_adapter: LLMProtocol = AnthropicAPIAdapter(api_key=api_key, model=model)
+    elif llm_adapter_type == "claude_cli":
+        llm_adapter = ClaudeCliAdapter()
     else:
         model_name = os.environ.get("MODEL_NAME")
         device = os.environ.get("DEVICE", "mps")

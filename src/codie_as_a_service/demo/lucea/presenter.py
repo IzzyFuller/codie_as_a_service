@@ -81,11 +81,35 @@ class NiceGUITriagePresenter:
 
     def show_response(self, response: str) -> None:
         """Add an assistant-style response to the left panel."""
+        cleaned = self._clean_response(response)
         meta = _SPEAKER_META["nurse-assistant"]
         with self._left:
             ui.label("Nurse Assistant").classes(f"speaker-label {meta['label_class']}")
-            ui.html(f"<div class='message-bubble {meta['msg_class']}'>{response}</div>")
+            ui.html(f"<div class='message-bubble {meta['msg_class']}'>{cleaned}</div>")
         self._scroll_to_bottom(self._left)
+
+    @staticmethod
+    def _clean_response(text: str) -> str:
+        """Extract display text from a CaaS JSON response and format as HTML."""
+        import json
+        import re
+
+        # Try to extract "output" field from JSON
+        try:
+            data = json.loads(text)
+            if isinstance(data, dict) and "output" in data:
+                text = data["output"]
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # Convert markdown bold **text** to <b>text</b>
+        text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text)
+        # Convert bullet points
+        text = re.sub(r'(?m)^[•·]\s*', '• ', text)
+        # Convert \n to <br>
+        text = text.replace('\n', '<br>')
+
+        return text
 
     # ── Private helpers ──────────────────────────────────────────────────
 
@@ -129,4 +153,4 @@ class NiceGUITriagePresenter:
 
     @staticmethod
     def _scroll_to_bottom(container: Element) -> None:
-        container.run_method("setScrollPosition", 99999, 300)
+        container.scroll_to(percent=1.0)

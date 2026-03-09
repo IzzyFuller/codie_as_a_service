@@ -8,6 +8,7 @@ Tool execution happens internally — the adapter returns the final result.
 
 import json
 import logging
+import threading
 from typing import Any
 
 from mlx_lm import generate, load
@@ -47,6 +48,7 @@ class LocalLLMAdapter:
         self._model, self._tokenizer = load(model_name)  # type: ignore[misc]
         self._outlines_model = from_mlxlm(self._model, self._tokenizer)
         self._fsm_cache: dict[str, Any] = {}
+        self._gpu_lock = threading.Lock()
         logger.info("Model loaded successfully")
 
     DEFAULT_MAX_NEW_TOKENS = 2048
@@ -96,7 +98,9 @@ class LocalLLMAdapter:
         json_schema = output_model.model_json_schema() if output_model else None
 
         # Single call — _generate handles tool loop internally in production
-        text = self._generate(prompt, effective_max_tokens, json_schema=json_schema)
+        # Lock serializes GPU access; Metal command buffers aren't thread-safe
+        with self._gpu_lock:
+            text = self._generate(prompt, effective_max_tokens, json_schema=json_schema)
 
         # Return validated model or plain text
         if output_model is not None:
